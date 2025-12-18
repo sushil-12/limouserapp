@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "1088057204155",
+    "project_id": "limo-2f17f",
+    "storage_bucket": "limo-2f17f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1088057204155:android:360463c7e805bdc817389e",
+        "android_client_info": {
+          "package_name": "com.example.limouserapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDf_9-EPw5ewH5QVhTsTFAyd6MzgSQzTIM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1088057204155:android:5fb7443fdcb126a617389e",
+        "android_client_info": {
+          "package_name": "com.limo1800.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDf_9-EPw5ewH5QVhTsTFAyd6MzgSQzTIM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

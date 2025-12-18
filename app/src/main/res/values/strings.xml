@@ -1,0 +1,53 @@
+<resources>
+    <string name="app_name">1800Limo</string>
+    
+    <!-- Error Messages -->
+    <string name="error_no_internet">No internet connection. Please check your network settings.</string>
+    <string name="error_timeout">Request timeout. Please try again.</string>
+    <string name="error_server">Server error. Please try again later.</string>
+    <string name="error_unauthorized">Session expired. Please login again.</string>
+    <string name="error_forbidden">Access denied. Please contact support.</string>
+    <string name="error_not_found">Resource not found.</string>
+    <string name="error_rate_limit">Too many requests. Please wait a moment.</string>
+    <string name="error_api">API error occurred.</string>
+    <string name="error_network_io">Network error. Please check your connection.</string>
+    <string name="error_unknown">An unexpected error occurred.</string>
+    <string name="error_http">HTTP error: %d</string>
+    
+    <!-- Retry Messages -->
+    <string name="retry_check_internet">Please check your internet connection and try again.</string>
+    <string name="retry_timeout">The request took too long. Please try again.</string>
+    <string name="retry_server_error">Server is temporarily unavailable. Please try again later.</string>
+    <string name="retry_rate_limit">Please wait a moment before trying again.</string>
+    
+    <!-- Validation Messages -->
+    <string name="validation_phone_required">Phone number is required</string>
+    <string name="validation_phone_invalid">Please enter a valid phone number</string>
+    <string name="validation_otp_required">OTP is required</string>
+    <string name="validation_otp_invalid">Please enter a valid 6-digit OTP</string>
+    <string name="validation_email_required">Email is required</string>
+    <string name="validation_email_invalid">Please enter a valid email address</string>
+    <string name="validation_name_required">Name is required</string>
+    <string name="validation_name_invalid">Please enter a valid name</string>
+    <string name="validation_card_required">Card details are required</string>
+    <string name="validation_card_invalid">Please enter valid card details</string>
+    
+    <!-- Success Messages -->
+    <string name="success_otp_sent">OTP sent successfully</string>
+    <string name="success_otp_verified">OTP verified successfully</string>
+    <string name="success_profile_updated">Profile updated successfully</string>
+    <string name="success_card_added">Card added successfully</string>
+    
+    <!-- Loading Messages -->
+    <string name="loading_sending_otp">Sending OTP...</string>
+    <string name="loading_verifying_otp">Verifying OTP...</string>
+    <string name="loading_submitting_details">Submitting details...</string>
+    <string name="loading_adding_card">Adding card...</string>
+    <string name="loading_searching_locations">Searching locations...</string>
+
+    <string name="m3_picker_text_input_period_am">AM</string>
+    <string name="m3_picker_text_input_period_pm">PM</string>
+
+    <string name="m3_timepicker_period_am">AM</string>
+    <string name="m3_timepicker_period_pm">PM</string>
+</resources>
