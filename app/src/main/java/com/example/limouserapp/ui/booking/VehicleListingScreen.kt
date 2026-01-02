@@ -439,7 +439,7 @@ private fun VehicleListingCard(
                         modifier = Modifier.height(36.dp)
                     ) {
                         Text(
-                            "Booking Details", // Updated text per screenshot
+                            "Ride Details", // Updated text per screenshot
                             style = TextStyle(
                                 fontSize = 13.sp, // Increased from 11.sp
                                 fontWeight = FontWeight.Medium,

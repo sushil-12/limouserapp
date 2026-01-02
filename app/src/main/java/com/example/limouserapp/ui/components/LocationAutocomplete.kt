@@ -38,7 +38,7 @@ import com.example.limouserapp.ui.components.ShimmerListItem
 fun LocationAutocomplete(
     value: String,
     onValueChange: (String) -> Unit,
-    onLocationSelected: (String, String, String, String, String, Double?, Double?, String?) -> Unit, // (fullAddress, city, state, zipCode, locationDisplay, latitude, longitude, country)
+    onLocationSelected: (String, String, String, String, String, Double?, Double?, String?) -> Unit,
     modifier: Modifier = Modifier,
     placeholder: String = "Search your location",
     error: String? = null,
@@ -46,10 +46,10 @@ fun LocationAutocomplete(
 ) {
     val context = LocalContext.current
     val isPreview = LocalInspectionMode.current
-    val placesService = remember(isPreview) { 
-        if (isPreview) null else try { PlacesService(context) } catch (e: Exception) { 
+    val placesService = remember(isPreview) {
+        if (isPreview) null else try { PlacesService(context) } catch (e: Exception) {
             Log.e("LocationAutocomplete", "Failed to initialize PlacesService", e)
-            null 
+            null
         }
     }
     val coroutineScope = rememberCoroutineScope()
@@ -59,50 +59,60 @@ fun LocationAutocomplete(
     var showSuggestions by remember { mutableStateOf(false) }
     var suppressSearch by remember { mutableStateOf(false) }
     var hasUserInteracted by remember { mutableStateOf(false) }
+    var selectionInProgress by remember { mutableStateOf(false) }
+
     var initialValue by remember { mutableStateOf(value) }
     var currentValue by remember { mutableStateOf(value) }
 
-    // Update currentValue when value prop changes (e.g., from profile data)
+    // Update currentValue when value prop changes
     LaunchedEffect(value) {
         if (value != currentValue) {
             currentValue = value
-            initialValue = value
-            // Reset user interaction flag if value is set externally
-            if (value.isNotEmpty() && !hasUserInteracted) {
+
+            // 🔒 DO NOT reopen dropdown if change came from selection
+            if (selectionInProgress) {
+                suppressSearch = true
+                showSuggestions = false
+                return@LaunchedEffect
+            }
+
+            val wasEmpty = initialValue.isEmpty()
+            val isPrefill = wasEmpty && value.isNotEmpty() && !hasUserInteracted
+
+            if (isPrefill) {
+                initialValue = value
+                hasUserInteracted = true
+                suppressSearch = true
+            } else if (value.isEmpty()) {
+                initialValue = ""
                 hasUserInteracted = false
+                suppressSearch = false
             }
         }
     }
 
-    // 🔍 Debounced search (disabled temporarily after selection)
+    // 🔍 Debounced search
     LaunchedEffect(currentValue, placesService, suppressSearch) {
         if (suppressSearch) return@LaunchedEffect
-        
-        // Don't show suggestions on initial load - only after user interaction
+
         if (!hasUserInteracted && currentValue == initialValue) {
             showSuggestions = false
             return@LaunchedEffect
         }
-        
+
         if (currentValue.length >= 2) {
             if (placesService != null) {
-                delay(500) // Increased delay to reduce API calls
+                delay(500)
                 isLoading = true
                 try {
-                    Log.d("LocationAutocomplete", "Searching for: $currentValue")
                     predictions = placesService.getPlacePredictions(currentValue)
-                    Log.d("LocationAutocomplete", "Found ${predictions.size} predictions")
                     showSuggestions = predictions.isNotEmpty()
                 } catch (e: Exception) {
-                    Log.e("LocationAutocomplete", "Error getting predictions", e)
-                    e.printStackTrace()
                     predictions = emptyList()
                     showSuggestions = false
                 }
                 isLoading = false
             } else {
-                // Fallback: Create a simple prediction from the input
-                Log.d("LocationAutocomplete", "Using fallback for: $currentValue")
                 predictions = listOf(
                     PlacePrediction(
                         placeId = "fallback_${currentValue.hashCode()}",
@@ -124,14 +134,14 @@ fun LocationAutocomplete(
             value = currentValue,
             onValueChange = {
                 hasUserInteracted = true
+                selectionInProgress = false
+                suppressSearch = false
                 currentValue = it
                 onValueChange(it)
                 onErrorCleared?.invoke()
-                suppressSearch = false
                 if (it.isEmpty()) showSuggestions = false
             },
             placeholder = {
-                // Ensure placeholder text is vertically centered and uses light grey color
                 Box(
                     modifier = Modifier.fillMaxHeight(),
                     contentAlignment = Alignment.CenterStart
@@ -141,8 +151,8 @@ fun LocationAutocomplete(
                         style = TextStyle(
                             fontFamily = GoogleSansFamily,
                             fontWeight = FontWeight.Normal,
-                            fontSize = 14.sp,
-                            color = Color.Gray // Light grey color for placeholder
+                            fontSize = 16.sp,
+                            color = Color.Gray
                         )
                     )
                 }
@@ -156,7 +166,7 @@ fun LocationAutocomplete(
             textStyle = TextStyle(
                 fontFamily = GoogleSansFamily,
                 fontWeight = FontWeight.Normal,
-                fontSize = 14.sp,
+                fontSize = 16.sp,
                 color = Color(0xFF121212)
             ),
             colors = OutlinedTextFieldDefaults.colors(
@@ -167,15 +177,15 @@ fun LocationAutocomplete(
                 cursorColor = Color(0xFF121212)
             )
         )
-        // Error message (moved outside the OutlinedTextField to be below it)
-        error?.let { errorMessage ->
+
+        error?.let {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = errorMessage,
+                text = it,
                 color = Color.Red,
                 fontSize = 12.sp,
-                fontFamily = GoogleSansFamily, // Changed to GoogleSansFamily for consistency
-                modifier = Modifier.padding(start = 16.dp) // Add padding to align with the text field's content
+                fontFamily = GoogleSansFamily,
+                modifier = Modifier.padding(start = 16.dp)
             )
         }
 
@@ -193,56 +203,45 @@ fun LocationAutocomplete(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp) // Adjusted padding to reduce the gap
-                    .clip(RoundedCornerShape(8.dp)) // Changed to 8.dp for consistency
+                    .padding(top = 8.dp)
+                    .clip(RoundedCornerShape(8.dp))
                     .zIndex(10f),
                 colors = CardDefaults.cardColors(containerColor = Color.White)
             ) {
                 when {
                     isLoading -> LoadingIndicator()
                     predictions.isNotEmpty() -> SuggestionList(predictions) { prediction ->
+                        selectionInProgress = true
                         suppressSearch = true
+                        showSuggestions = false
                         onValueChange(prediction.fullText)
-                        
-                        // Fetch full place details asynchronously
+
                         coroutineScope.launch {
                             if (placesService != null && !prediction.placeId.startsWith("fallback_")) {
                                 try {
-                                    Log.d("LocationAutocomplete", "Fetching place details for placeId: ${prediction.placeId}")
                                     val placeDetails = placesService.getPlaceDetails(prediction.placeId)
                                     if (placeDetails != null) {
-                                        // Use full address from PlaceDetails, fallback to fullText if not available
-                                        val fullAddress = placeDetails.address.ifEmpty { prediction.fullText }
-                                        val city = placeDetails.city
-                                        val state = placeDetails.state
-                                        val postalCode = placeDetails.postalCode
-                                        val locationDisplay = prediction.fullText // Display text for the input field
-                                        val latitude = placeDetails.latitude
-                                        val longitude = placeDetails.longitude
-                                        val country = placeDetails.country
-                                        
-                                        Log.d("LocationAutocomplete", "Place details fetched - FullAddress: $fullAddress, City: $city, State: $state, PostalCode: $postalCode, Country: $country, Lat: $latitude, Lng: $longitude")
-                                        
-                                        onLocationSelected(fullAddress, city, state, postalCode, locationDisplay, latitude, longitude, country)
+                                        onLocationSelected(
+                                            placeDetails.address.ifEmpty { prediction.fullText },
+                                            placeDetails.city,
+                                            placeDetails.state,
+                                            placeDetails.postalCode,
+                                            prediction.fullText,
+                                            placeDetails.latitude,
+                                            placeDetails.longitude,
+                                            placeDetails.country
+                                        )
                                     } else {
-                                        Log.w("LocationAutocomplete", "Place details fetch returned null for placeId: ${prediction.placeId}")
-                                        // Fallback if place details fetch fails
                                         onLocationSelected(prediction.fullText, "", "", "", prediction.fullText, null, null, null)
                                     }
                                 } catch (e: Exception) {
-                                    Log.e("LocationAutocomplete", "Error fetching place details", e)
-                                    e.printStackTrace()
-                                    // Fallback on error
                                     onLocationSelected(prediction.fullText, "", "", "", prediction.fullText, null, null, null)
                                 }
                             } else {
-                                Log.d("LocationAutocomplete", "Using fallback (no PlacesService or fallback prediction)")
-                                // For fallback predictions, just use the text as entered
                                 onLocationSelected(prediction.fullText, "", "", "", prediction.fullText, null, null, null)
                             }
+                            selectionInProgress = false
                         }
-                        
-                        showSuggestions = false
                     }
                 }
             }

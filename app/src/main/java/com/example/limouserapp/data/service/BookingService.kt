@@ -27,9 +27,12 @@ class BookingService @Inject constructor(
         Log.d(DebugTags.BookingProcess, "Shares Array - Grand Total: ${request.sharesArray.grandTotal}")
         Log.d(DebugTags.BookingProcess, "Shares Array - Affiliate Share: ${request.sharesArray.affiliateShare}")
         Log.d(DebugTags.BookingProcess, "===========================================")
-        
+
+        Log.d(DebugTags.BookingProcess, request.toString())
+
+
         val response = api.createReservation(request)
-        
+
         Log.d(DebugTags.BookingProcess, "===========================================")
         Log.d(DebugTags.BookingProcess, "✅ API CALL SUCCESSFUL")
         Log.d(DebugTags.BookingProcess, "===========================================")
@@ -37,7 +40,7 @@ class BookingService @Inject constructor(
         Log.d(DebugTags.BookingProcess, "Response Message: ${response.message}")
         Log.d(DebugTags.BookingProcess, "Booking ID: ${response.bookingId}")
         Log.d(DebugTags.BookingProcess, "===========================================")
-        
+
         Result.success(response)
     } catch (e: Exception) {
         Log.e(DebugTags.BookingProcess, "===========================================")

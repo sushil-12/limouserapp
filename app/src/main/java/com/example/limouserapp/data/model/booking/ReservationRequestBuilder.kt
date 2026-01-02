@@ -15,8 +15,8 @@ object ReservationRequestBuilder {
      * Matches iOS mapTransferTypeToAPI logic
      */
     fun mapTransferType(pickupType: String, dropoffType: String): String {
-        val pickup = pickupType.lowercase()
-        val dropoff = dropoffType.lowercase()
+        val pickup = pickupType.lowercase().replace("cruise port", "cruise").replace("cruise_port", "cruise").trim()
+        val dropoff = dropoffType.lowercase().replace("cruise port", "cruise").replace("cruise_port", "cruise").trim()
         
         return when {
             pickup == "city" && dropoff == "city" -> "city_to_city"
@@ -27,6 +27,7 @@ object ReservationRequestBuilder {
             pickup == "cruise" && dropoff == "city" -> "cruise_to_city"
             pickup == "airport" && dropoff == "cruise" -> "airport_to_cruise"
             pickup == "cruise" && dropoff == "airport" -> "cruise_to_airport"
+            pickup == "cruise" && dropoff == "cruise" -> "cruise_to_cruise"
             else -> "city_to_city"
         }
     }
@@ -45,6 +46,7 @@ object ReservationRequestBuilder {
             "airport_to_cruise" -> "cruise_to_airport"
             "cruise_to_city" -> "city_to_cruise"
             "cruise_to_airport" -> "airport_to_cruise"
+            "cruise_to_cruise" -> "cruise_to_cruise"
             else -> "city_to_city"
         }
     }

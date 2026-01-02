@@ -44,8 +44,8 @@ fun BookingDetailsSection(
     onDateClick: () -> Unit,
     onTimeClick: () -> Unit,
     isEditMode: Boolean,
-    passengerCount: Int,
-    luggageCount: Int,
+    passengerCount: String,
+    luggageCount: String,
     onPassengerCountChange: (Int) -> Unit,
     onLuggageCountChange: (Int) -> Unit,
     // Meet & Greet fields (matches web app)
@@ -53,7 +53,17 @@ fun BookingDetailsSection(
     meetAndGreetOptions: List<String>,
     showMeetAndGreetDropdown: Boolean,
     onMeetAndGreetChange: (String) -> Unit,
-    onMeetAndGreetDropdownChange: (Boolean) -> Unit
+    onMeetAndGreetDropdownChange: (Boolean) -> Unit,
+    // Error states
+    serviceTypeError: Boolean = false,
+    transferTypeError: Boolean = false,
+    pickupDateTimeError: Boolean = false,
+    charterHoursError: Boolean = false,
+    // Error messages
+    serviceTypeErrorMessage: String? = null,
+    transferTypeErrorMessage: String? = null,
+    pickupDateTimeErrorMessage: String? = null,
+    charterHoursErrorMessage: String? = null
 ) {
     SectionHeader("Booking Details")
     
@@ -63,7 +73,9 @@ fun BookingDetailsSection(
         options = serviceTypes,
         expanded = showServiceTypeDropdown,
         onExpand = onServiceTypeDropdownChange,
-        onSelect = onServiceTypeSelected
+        onSelect = onServiceTypeSelected,
+        isError = serviceTypeError,
+        errorMessage = serviceTypeErrorMessage
     )
     Spacer(Modifier.height(12.dp))
     
@@ -73,7 +85,9 @@ fun BookingDetailsSection(
         options = transferTypes,
         expanded = showTransferTypeDropdown,
         onExpand = onTransferTypeDropdownChange,
-        onSelect = onTransferTypeSelected
+        onSelect = onTransferTypeSelected,
+        isError = transferTypeError,
+        errorMessage = transferTypeErrorMessage
     )
     Spacer(Modifier.height(12.dp))
     
@@ -149,7 +163,9 @@ fun BookingDetailsSection(
             options = hoursOptions,
             expanded = showHoursDropdown,
             onExpand = onHoursDropdownChange,
-            onSelect = onHoursSelected
+            onSelect = onHoursSelected,
+            isError = charterHoursError,
+            errorMessage = charterHoursErrorMessage
         )
     }
 }

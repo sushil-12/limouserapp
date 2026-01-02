@@ -78,7 +78,7 @@ fun MasterVehicleSelectionScreen(
     }
 
     LaunchedEffect(rideData) {
-        Log.d(DebugTags.BookingProcess, "Open MasterVehicleSelection. Fetching master vehicles for ride: $rideData")                                            
+        Log.d(DebugTags.BookingProcess, "Open MasterVehicleSelection. Loading master vehicles for ride: $rideData")
         viewModel.loadMasterVehicles(rideData)
     }
 

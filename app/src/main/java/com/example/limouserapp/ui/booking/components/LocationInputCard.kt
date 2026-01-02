@@ -18,14 +18,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.limouserapp.R
 import com.example.limouserapp.ui.theme.LimoBlack
-import com.example.limouserapp.ui.theme.LimoOrange
 import com.example.limouserapp.ui.theme.GoogleSansFamily
 
-/**
- * Location input card matching Figma design specs
- * Width: ~300dp, Height: ~79dp
- * Background: #F5F5F5, Border: 1dp #121212, Corner radius: 8dp
- */
 @Composable
 fun LocationInputCard(
     pickupValue: String,
@@ -38,6 +32,8 @@ fun LocationInputCard(
     showDestinationClear: Boolean,
     onPickupClear: () -> Unit,
     onDestinationClear: () -> Unit,
+    // Unused params removed from signature for cleaner code if not used,
+    // or keep them if you plan to attach clickable modifiers later.
     onPickupMapClick: () -> Unit,
     onDestinationMapClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -46,25 +42,39 @@ fun LocationInputCard(
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, LimoBlack),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        modifier = modifier.height(79.dp)
+        // FIX 1: Removed fixed height(79.dp). Let content define height.
+        modifier = modifier.wrapContentHeight()
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 12.5.dp, top = 13.dp, end = 10.dp, bottom = 13.dp),
+                // FIX 2: IntrinsicSize.Min allows child columns to match heights
+                .height(IntrinsicSize.Min)
+                .padding(vertical = 16.dp), // Increased padding slightly for breathing room
             verticalAlignment = Alignment.Top
         ) {
-            // Indicators
-            LocationIndicators()
+
+            // Indicators Column
+            Box(
+                modifier = Modifier
+                    .padding(start = 12.5.dp)
+                    .width(12.dp)
+                    .fillMaxHeight(), // Stretches to match the text column
+                contentAlignment = Alignment.TopCenter
+            ) {
+                LocationIndicators()
+            }
 
             Spacer(modifier = Modifier.width(14.dp))
 
-            // Text fields
+            // Text fields Column
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 10.dp),
                 verticalArrangement = Arrangement.Center
             ) {
-                // Pickup text aligned with top icon
+                // Pickup text
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -76,23 +86,21 @@ fun LocationInputCard(
                         onFocusChanged = onPickupFocusChanged,
                         modifier = Modifier.weight(1f)
                     )
-                    // Clear icon for pickup
                     if (pickupValue.isNotEmpty() && showPickupClear) {
                         Spacer(modifier = Modifier.width(8.dp))
                         ClearIcon(onClick = onPickupClear)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
+                // Spacing and Divider
+                Spacer(modifier = Modifier.height(12.dp))
                 Divider(
                     color = LimoBlack.copy(alpha = 0.06f),
                     thickness = 1.dp
                 )
+                Spacer(modifier = Modifier.height(12.dp))
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Destination text aligned with bottom icon
+                // Destination text
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -104,7 +112,6 @@ fun LocationInputCard(
                         onFocusChanged = onDestinationFocusChanged,
                         modifier = Modifier.weight(1f)
                     )
-                    // Clear icon for destination
                     if (destinationValue.isNotEmpty() && showDestinationClear) {
                         Spacer(modifier = Modifier.width(8.dp))
                         ClearIcon(onClick = onDestinationClear)
@@ -115,59 +122,56 @@ fun LocationInputCard(
     }
 }
 
-
 /**
- * Visual indicators (both squares) with connecting line
- * Top: orange square (#F3933D, 12dp) with white inner square (6.21dp)
- * Bottom: orange square (#F3933D, 12dp) with white inner square (5.87dp)
- * Line: black line (#121212, 1dp width, 31dp height)
+ * FIX 3: Refactored Indicators to be dynamic.
+ * Instead of hardcoded Box offsets, we use a Column with weight.
+ * This ensures the line connects the dots regardless of the text container height.
  */
 @Composable
 private fun LocationIndicators() {
-    Box(
-        modifier = Modifier
-            .width(12.dp)
-//            .padding(top = 13.17.dp)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxHeight()
     ) {
-        // Pickup indicator
-        Icon(
-            painter = painterResource(id = R.drawable.pickup_circle),
-            contentDescription = "Pickup",
-            tint = Color.Unspecified,
-            modifier = Modifier
-                .size(12.dp)
-                .align(Alignment.TopStart)
-        )
+        // 1. Top Icon (Pickup)
+        // We wrap in a Box of fixed height to align center with the Text Field's first line
+        Box(
+            modifier = Modifier.height(20.dp), // Approximate height of single line text
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.pickup_circle),
+                contentDescription = "Pickup",
+                tint = Color.Unspecified,
+                modifier = Modifier.size(12.dp)
+            )
+        }
 
-        // Connecting line – placed below pickup and before dropoff
+        // 2. Connecting Line (Dynamic Height)
+        // weight(1f) makes it fill all available space between top and bottom icons
         Box(
             modifier = Modifier
                 .width(1.dp)
-                .height(30.dp) // 30dp = line length between icons
-                .align(Alignment.TopCenter)
-                .offset(y = 12.dp + 1.dp) // start just below pickup icon with a small gap
+                .weight(1f)
                 .background(LimoBlack)
         )
 
-        // Dropoff indicator
-        Icon(
-            painter = painterResource(id = R.drawable.dropoff_square),
-            contentDescription = "Dropoff",
-            tint = Color.Unspecified,
-            modifier = Modifier
-                .size(12.dp)
-                .align(Alignment.TopStart)
-                .offset(y = 12.dp + 30.dp + 2.dp) // pickup height + line height + spacing
-        )
+        // 3. Bottom Icon (Dropoff)
+        Box(
+            modifier = Modifier.height(20.dp), // Approximate height of single line text
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.dropoff_square),
+                contentDescription = "Dropoff",
+                tint = Color.Unspecified,
+                modifier = Modifier.size(12.dp)
+            )
+        }
     }
 }
 
-
-
-/**
- * Location text field with Google Sans typography
- * 16sp, weight 400, color #121212
- */
+// ... LocationText and ClearIcon remain unchanged ...
 @Composable
 private fun LocationText(
     value: String,
@@ -191,7 +195,7 @@ private fun LocationText(
         ),
         singleLine = true,
         decorationBox = { innerTextField ->
-            Box {
+            Box(contentAlignment = Alignment.CenterStart) {
                 if (value.isEmpty()) {
                     Text(
                         text = placeholder,
@@ -208,4 +212,3 @@ private fun LocationText(
         }
     )
 }
-

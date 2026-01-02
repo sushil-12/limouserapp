@@ -36,6 +36,7 @@ fun ReturnJourneySection(
     returnPickupFlightNumber: String,
     returnDropoffFlightNumber: String,
     returnOriginAirportCity: String,
+    returnCruisePort: String,
     returnCruiseShipName: String,
     returnShipArrivalTime: String,
     returnSpecialInstructions: String,
@@ -70,6 +71,7 @@ fun ReturnJourneySection(
     onReturnFlightNumberChange: (String) -> Unit,
     onReturnDropoffFlightNumberChange: (String) -> Unit,
     onReturnOriginCityChange: (String) -> Unit,
+    onReturnCruisePortChange: (String) -> Unit,
     onReturnCruiseShipChange: (String) -> Unit,
     onReturnShipArrivalChange: (String) -> Unit,
     onReturnSpecialInstructionsChange: (String) -> Unit,
@@ -83,11 +85,21 @@ fun ReturnJourneySection(
     onReturnExtraStopsLocationSelected: (com.example.limouserapp.ui.booking.comprehensivebooking.ExtraStop, String, String, String, String, String, Double?, Double?, String?) -> Unit,
     onReturnExtraStopsLocationChange: (com.example.limouserapp.ui.booking.comprehensivebooking.ExtraStop, String) -> Unit,
     onReturnExtraStopsInstructionsChange: (com.example.limouserapp.ui.booking.comprehensivebooking.ExtraStop, String) -> Unit,
-    showReturnInvalidLocationDialog: Boolean,
-    returnInvalidLocationMessage: String,
     // Return Distance parameters
     returnDistance: Pair<String, String>?,
-    returnDistanceLoading: Boolean
+    returnDistanceLoading: Boolean,
+    // Error states
+    returnPickupDateTimeError: Boolean = false,
+    returnPickupLocationError: Boolean = false,
+    returnPickupCoordinatesError: Boolean = false,
+    returnPickupAirportError: Boolean = false,
+    returnPickupAirlineError: Boolean = false,
+    returnPickupFlightError: Boolean = false,
+    returnOriginCityError: Boolean = false,
+    returnDropoffLocationError: Boolean = false,
+    returnDropoffCoordinatesError: Boolean = false,
+    returnDropoffAirportError: Boolean = false,
+    returnDropoffAirlineError: Boolean = false
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
         // Return Transfer Type, Meet & Greet (Service Type removed - it's the same as main service type)
@@ -128,7 +140,9 @@ fun ReturnJourneySection(
                     value = if (returnPickupDate.isNotEmpty()) formatDate(returnPickupDate) else "Select date",
                     onClick = onReturnDateClick,
                     icon = Icons.Default.CalendarToday,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    isError = returnPickupDateTimeError,
+                    errorMessage = if (returnPickupDateTimeError) "Return date is required" else null
                 )
                 
                 EditableField(
@@ -136,18 +150,11 @@ fun ReturnJourneySection(
                     value = if (returnPickupTime.isNotEmpty()) formatTime(returnPickupTime) else "Select time",
                     onClick = onReturnTimeClick,
                     icon = Icons.Default.AccessTime,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    isError = returnPickupDateTimeError,
+                    errorMessage = if (returnPickupDateTimeError) "Return time is required" else null
                 )
             }
-        }
-        
-        // Return Distance Information (positioned below Return Booking Details section, outside the section)
-        if (returnDistance != null) {
-            Spacer(Modifier.height(24.dp))
-            ReturnDistanceInformationSection(
-                returnDistance = returnDistance,
-                isLoading = returnDistanceLoading
-            )
         }
         
         // Return Pickup Section
@@ -157,6 +164,7 @@ fun ReturnJourneySection(
                 returnPickupLocation = returnPickupLocation,
                 returnPickupFlightNumber = returnPickupFlightNumber,
                 returnOriginAirportCity = returnOriginAirportCity,
+                returnCruisePort = returnCruisePort,
                 returnCruiseShipName = returnCruiseShipName,
                 returnShipArrivalTime = returnShipArrivalTime,
                 selectedReturnPickupAirport = selectedReturnPickupAirport,
@@ -167,8 +175,16 @@ fun ReturnJourneySection(
                 onAirlineClick = onReturnPickupAirlineClick,
                 onFlightNumberChange = onReturnFlightNumberChange,
                 onOriginCityChange = onReturnOriginCityChange,
+                onCruisePortChange = onReturnCruisePortChange,
                 onCruiseShipChange = onReturnCruiseShipChange,
-                onShipArrivalChange = onReturnShipArrivalChange
+                onShipArrivalChange = onReturnShipArrivalChange,
+                returnPickupLocationError = returnPickupLocationError,
+                returnPickupCoordinatesError = returnPickupCoordinatesError,
+                returnPickupAirportError = returnPickupAirportError,
+                returnPickupAirlineError = returnPickupAirlineError,
+                returnPickupFlightError = returnPickupFlightError,
+                returnOriginCityError = returnOriginCityError,
+                returnPickupDateTimeError = returnPickupDateTimeError
             )
         }
         
@@ -178,6 +194,7 @@ fun ReturnJourneySection(
                 selectedReturnTransferType = selectedReturnTransferType,
                 returnDropoffLocation = returnDropoffLocation,
                 returnDropoffFlightNumber = returnDropoffFlightNumber,
+                returnCruisePort = returnCruisePort,
                 returnCruiseShipName = returnCruiseShipName,
                 returnShipArrivalTime = returnShipArrivalTime,
                 selectedReturnDropoffAirport = selectedReturnDropoffAirport,
@@ -187,12 +204,25 @@ fun ReturnJourneySection(
                 onAirportClick = onReturnDropoffAirportClick,
                 onAirlineClick = onReturnDropoffAirlineClick,
                 onFlightNumberChange = onReturnDropoffFlightNumberChange,
+                onCruisePortChange = onReturnCruisePortChange,
                 onCruiseShipChange = onReturnCruiseShipChange,
-                onShipArrivalChange = onReturnShipArrivalChange
+                onShipArrivalChange = onReturnShipArrivalChange,
+                returnDropoffLocationError = returnDropoffLocationError,
+                returnDropoffCoordinatesError = returnDropoffCoordinatesError,
+                returnDropoffAirportError = returnDropoffAirportError,
+                returnDropoffAirlineError = returnDropoffAirlineError
             )
         }
         
-        // Return Extra Stops Section (positioned right after Return Dropoff Section)
+        // Return Distance Information (positioned right after Return Dropoff Section)
+        // This ensures proper ordering: Return Booking Details → Return Pickup → Return Drop-off → Return estimated distance & time
+        Spacer(Modifier.height(24.dp))
+        ReturnDistanceInformationSection(
+            returnDistance = returnDistance ?: Pair("", ""),
+            isLoading = returnDistanceLoading
+        )
+        
+        // Return Extra Stops Section (positioned right after Return Distance Information)
         if (selectedReturnTransferType != null) {
             Spacer(Modifier.height(16.dp))
             ReturnExtraStopsSection(
@@ -202,8 +232,6 @@ fun ReturnJourneySection(
                 onLocationSelected = onReturnExtraStopsLocationSelected,
                 onLocationChange = onReturnExtraStopsLocationChange,
                 onInstructionsChange = onReturnExtraStopsInstructionsChange,
-                showInvalidLocationDialog = showReturnInvalidLocationDialog,
-                invalidLocationMessage = returnInvalidLocationMessage
             )
         }
         
@@ -245,6 +273,7 @@ fun ReturnPickupSection(
     returnPickupLocation: String,
     returnPickupFlightNumber: String,
     returnOriginAirportCity: String,
+    returnCruisePort: String,
     returnCruiseShipName: String,
     returnShipArrivalTime: String,
     selectedReturnPickupAirport: Airport?,
@@ -255,8 +284,17 @@ fun ReturnPickupSection(
     onAirlineClick: () -> Unit,
     onFlightNumberChange: (String) -> Unit,
     onOriginCityChange: (String) -> Unit,
+    onCruisePortChange: (String) -> Unit,
     onCruiseShipChange: (String) -> Unit,
-    onShipArrivalChange: (String) -> Unit
+    onShipArrivalChange: (String) -> Unit,
+    // Error states
+    returnPickupLocationError: Boolean = false,
+    returnPickupCoordinatesError: Boolean = false,
+    returnPickupAirportError: Boolean = false,
+    returnPickupAirlineError: Boolean = false,
+    returnPickupFlightError: Boolean = false,
+    returnOriginCityError: Boolean = false,
+    returnPickupDateTimeError: Boolean = false
 ) {
     BookingSection(
         title = "Return Pick-up",
@@ -278,7 +316,8 @@ fun ReturnPickupSection(
                         value = returnPickupLocation,
                         onValueChange = onLocationChange,
                         onLocationSelected = onLocationSelected,
-                        placeholder = "Enter return pickup address"
+                        placeholder = "Enter return pickup address",
+                        error = if (returnPickupLocationError) "Return pickup location is required" else if (returnPickupCoordinatesError) "Select location with coordinates" else null
                     )
                 }
             }
@@ -290,31 +329,38 @@ fun ReturnPickupSection(
                     EditableField(
                         label = "SELECT AIRPORT",
                         value = selectedReturnPickupAirport?.displayName ?: "Search airports...",
-                        onClick = onAirportClick
+                        onClick = onAirportClick,
+                        isError = returnPickupAirportError,
+                        errorMessage = if (returnPickupAirportError) "Return pickup airport is required" else null
                     )
                     
                     EditableField(
                         label = "SELECT AIRLINE",
                         value = selectedReturnPickupAirline?.displayName ?: "Select Airline",
-                        onClick = onAirlineClick
+                        onClick = onAirlineClick,
+                        isError = returnPickupAirlineError,
+                        errorMessage = if (returnPickupAirlineError) "Return pickup airline is required" else null
                     )
                     
                     EditableTextField(
                         label = "FLIGHT / TAIL #",
                         value = returnPickupFlightNumber,
-                        onValueChange = onFlightNumberChange
+                        onValueChange = onFlightNumberChange,
+                        error = if (returnPickupFlightError) "Return pickup flight number is required" else null
                     )
                     
                     EditableTextField(
                         label = "ORIGIN AIRPORT / CITY",
                         value = returnOriginAirportCity,
-                        onValueChange = onOriginCityChange
+                        onValueChange = onOriginCityChange,
+                        error = if (returnOriginCityError) "Return origin airport city is required" else null
                     )
                 }
             }
             // Cruise Port pickup - show address + cruise ship details (matches iOS)
             selectedReturnTransferType == "Cruise Port to City" || 
-            selectedReturnTransferType == "Cruise Port to Airport" -> {
+            selectedReturnTransferType == "Cruise Port to Airport" ||
+            selectedReturnTransferType == "Cruise Port to Cruise Port" -> {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
@@ -325,20 +371,30 @@ fun ReturnPickupSection(
                             value = returnPickupLocation,
                             onValueChange = onLocationChange,
                             onLocationSelected = onLocationSelected,
-                            placeholder = "Enter return pickup address"
+                            placeholder = "Enter return pickup address",
+                            error = if (returnPickupLocationError) "Return pickup location is required" else if (returnPickupCoordinatesError) "Select location with coordinates" else null
                         )
                     }
                     
                     EditableTextField(
-                        label = "CRUISE SHIP NAME",
-                        value = returnCruiseShipName,
-                        onValueChange = onCruiseShipChange
+                        label = "CRUISE PORT",
+                        value = returnCruisePort,
+                        onValueChange = onCruisePortChange,
+                        error = if (returnPickupLocationError) "Cruise port is required" else null
                     )
                     
                     EditableTextField(
+                        label = "CRUISE SHIP NAME",
+                        value = returnCruiseShipName,
+                        onValueChange = onCruiseShipChange,
+                        error = if (returnPickupLocationError) "Cruise ship name is required" else null
+                    )
+                    
+                    EditableField(
                         label = "SHIP ARRIVAL TIME",
-                        value = returnShipArrivalTime,
-                        onValueChange = onShipArrivalChange
+                        value = if (returnShipArrivalTime.isNotEmpty()) returnShipArrivalTime else "Select time",
+                        onClick = { /* TODO: Add time picker */ },
+                        icon = Icons.Default.AccessTime
                     )
                 }
             }
@@ -355,6 +411,7 @@ fun ReturnDropoffSection(
     selectedReturnTransferType: String,
     returnDropoffLocation: String,
     returnDropoffFlightNumber: String,
+    returnCruisePort: String,
     returnCruiseShipName: String,
     returnShipArrivalTime: String,
     selectedReturnDropoffAirport: Airport?,
@@ -364,8 +421,14 @@ fun ReturnDropoffSection(
     onAirportClick: () -> Unit,
     onAirlineClick: () -> Unit,
     onFlightNumberChange: (String) -> Unit,
+    onCruisePortChange: (String) -> Unit,
     onCruiseShipChange: (String) -> Unit,
-    onShipArrivalChange: (String) -> Unit
+    onShipArrivalChange: (String) -> Unit,
+    // Error states
+    returnDropoffLocationError: Boolean = false,
+    returnDropoffCoordinatesError: Boolean = false,
+    returnDropoffAirportError: Boolean = false,
+    returnDropoffAirlineError: Boolean = false
 ) {
     BookingSection(
         title = "Return Drop-off",
@@ -387,7 +450,8 @@ fun ReturnDropoffSection(
                         value = returnDropoffLocation,
                         onValueChange = onLocationChange,
                         onLocationSelected = onLocationSelected,
-                        placeholder = "Enter return dropoff address"
+                        placeholder = "Enter return dropoff address",
+                        error = if (returnDropoffLocationError) "Return dropoff location is required" else if (returnDropoffCoordinatesError) "Select location with coordinates" else null
                     )
                 }
             }
@@ -399,13 +463,17 @@ fun ReturnDropoffSection(
                     EditableField(
                         label = "SELECT AIRPORT",
                         value = selectedReturnDropoffAirport?.displayName ?: "Search airports...",
-                        onClick = onAirportClick
+                        onClick = onAirportClick,
+                        isError = returnDropoffAirportError,
+                        errorMessage = if (returnDropoffAirportError) "Return dropoff airport is required" else null
                     )
                     
                     EditableField(
                         label = "SELECT AIRLINE",
                         value = selectedReturnDropoffAirline?.displayName ?: "Select Airline",
-                        onClick = onAirlineClick
+                        onClick = onAirlineClick,
+                        isError = returnDropoffAirlineError,
+                        errorMessage = if (returnDropoffAirlineError) "Return dropoff airline is required" else null
                     )
                     
                     EditableTextField(
@@ -417,7 +485,8 @@ fun ReturnDropoffSection(
             }
             // Cruise Port dropoff - show address + cruise ship details (matches iOS)
             selectedReturnTransferType == "City to Cruise Port" || 
-            selectedReturnTransferType == "Airport to Cruise Port" -> {
+            selectedReturnTransferType == "Airport to Cruise Port" ||
+            selectedReturnTransferType == "Cruise Port to Cruise Port" -> {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
@@ -428,20 +497,30 @@ fun ReturnDropoffSection(
                             value = returnDropoffLocation,
                             onValueChange = onLocationChange,
                             onLocationSelected = onLocationSelected,
-                            placeholder = "Enter return dropoff address"
+                            placeholder = "Enter return dropoff address",
+                            error = if (returnDropoffLocationError) "Return dropoff location is required" else if (returnDropoffCoordinatesError) "Select location with coordinates" else null
                         )
                     }
                     
                     EditableTextField(
-                        label = "CRUISE SHIP NAME",
-                        value = returnCruiseShipName,
-                        onValueChange = onCruiseShipChange
+                        label = "CRUISE PORT",
+                        value = returnCruisePort,
+                        onValueChange = onCruisePortChange,
+                        error = if (returnDropoffLocationError) "Cruise port is required" else null
                     )
                     
                     EditableTextField(
+                        label = "CRUISE SHIP NAME",
+                        value = returnCruiseShipName,
+                        onValueChange = onCruiseShipChange,
+                        error = if (returnDropoffLocationError) "Cruise ship name is required" else null
+                    )
+                    
+                    EditableField(
                         label = "SHIP ARRIVAL TIME",
-                        value = returnShipArrivalTime,
-                        onValueChange = onShipArrivalChange
+                        value = if (returnShipArrivalTime.isNotEmpty()) returnShipArrivalTime else "Select time",
+                        onClick = { /* TODO: Add time picker */ },
+                        icon = Icons.Default.AccessTime
                     )
                 }
             }

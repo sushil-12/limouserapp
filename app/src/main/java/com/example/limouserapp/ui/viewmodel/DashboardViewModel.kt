@@ -9,6 +9,7 @@ import com.example.limouserapp.data.socket.ActiveRide
 import com.example.limouserapp.domain.usecase.dashboard.GetUpcomingBookingsUseCase
 import com.example.limouserapp.domain.usecase.dashboard.GetUserBookingsUseCase
 import com.example.limouserapp.domain.usecase.dashboard.GetUserProfileUseCase
+import com.example.limouserapp.domain.usecase.dashboard.RefreshUserProfileUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +25,7 @@ import javax.inject.Inject
 @HiltViewModel
 class DashboardViewModel @Inject constructor(
     private val getUserProfileUseCase: GetUserProfileUseCase,
+    private val refreshUserProfileUseCase: RefreshUserProfileUseCase,
     private val getUpcomingBookingsUseCase: GetUpcomingBookingsUseCase,
     private val getUserBookingsUseCase: GetUserBookingsUseCase,
     private val realTimeTrackingService: RealTimeTrackingService,
@@ -192,6 +194,34 @@ class DashboardViewModel @Inject constructor(
      */
     fun refreshDashboard() {
         loadDashboardData()
+    }
+    
+    /**
+     * Refresh user profile from API (forces fresh data, updates cache)
+     * Use this when profile data needs to be updated (e.g., after account settings changes)
+     */
+    fun refreshUserProfile() {
+        Timber.d("DashboardViewModel: refreshUserProfile() called")
+        viewModelScope.launch {
+            Timber.d("DashboardViewModel: Starting profile refresh from API...")
+            refreshUserProfileUseCase().fold(
+                onSuccess = { profile ->
+                    Timber.d("DashboardViewModel: Profile refresh successful - fullName=${profile.fullName}, firstName=${profile.firstName}, lastName=${profile.lastName}")
+                    _uiState.value = _uiState.value.copy(
+                        userProfile = profile,
+                        profileLoading = false
+                    )
+                    Timber.d("DashboardViewModel: UI state updated with new profile")
+                },
+                onFailure = { error ->
+                    Timber.e(error, "DashboardViewModel: Error refreshing user profile")
+                    _uiState.value = _uiState.value.copy(
+                        profileLoading = false,
+                        error = error.message
+                    )
+                }
+            )
+        }
     }
     
     /**

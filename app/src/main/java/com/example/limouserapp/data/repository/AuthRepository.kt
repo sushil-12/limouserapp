@@ -47,7 +47,7 @@ class AuthRepository @Inject constructor(
                 val response = authApi.sendVerificationCode(request)
                 Result.success(response)
             } catch (e: Exception) {
-                Result.failure(Exception(errorHandler.handleApiError(e)))
+                Result.failure(Exception(errorHandler.handleError(e)))
             }
         }
     }
@@ -79,7 +79,7 @@ class AuthRepository @Inject constructor(
                 
                 Result.success(response)
             } catch (e: Exception) {
-                Result.failure(Exception(errorHandler.handleApiError(e)))
+                Result.failure(Exception(errorHandler.handleError(e)))
             }
         }
     }
@@ -94,7 +94,7 @@ class AuthRepository @Inject constructor(
                 val response = authApi.resendOTP(request)
                 Result.success(response)
             } catch (e: Exception) {
-                Result.failure(Exception(errorHandler.handleApiError(e)))
+                Result.failure(Exception(errorHandler.handleError(e)))
             }
         }
     }

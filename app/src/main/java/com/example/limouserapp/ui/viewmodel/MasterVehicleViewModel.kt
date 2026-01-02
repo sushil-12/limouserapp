@@ -41,8 +41,24 @@ class MasterVehicleViewModel @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
+    // Cache for storing loaded vehicles to avoid re-fetching when navigating back
+    private var cachedVehicles: MutableMap<String, List<Vehicle>> = mutableMapOf()
+    private var lastRideDataKey: String? = null
+
     fun loadMasterVehicles(rideData: RideData) {
         viewModelScope.launch {
+            // Create a cache key based on key ride data parameters
+            val cacheKey = createCacheKey(rideData)
+
+            // Check if we have cached data for this ride data
+            val cachedData = cachedVehicles[cacheKey]
+            if (cachedData != null && cacheKey == lastRideDataKey) {
+                Log.d(DebugTags.BookingProcess, "Using cached master vehicles data for ride: $rideData")
+                _vehicles.value = cachedData
+                _loading.value = false
+                return@launch
+            }
+
             _loading.value = true
             _error.value = null
             Log.d(DebugTags.BookingProcess, "Requesting master vehicle listing for ride: $rideData")
@@ -167,7 +183,12 @@ class MasterVehicleViewModel @Inject constructor(
                         vehicleActual.toVehicle(rideData.serviceType)
                     }
                     _vehicles.value = vehicles
-                    Log.d(DebugTags.BookingProcess, "Received ${vehicles.size} master vehicles for service type: ${rideData.serviceType}")
+
+                    // Cache the loaded vehicles
+                    cachedVehicles[cacheKey] = vehicles
+                    lastRideDataKey = cacheKey
+
+                    Log.d(DebugTags.BookingProcess, "Received ${vehicles.size} master vehicles for service type: ${rideData.serviceType} (cached)")
                 } else {
                     _error.value = "Failed to load vehicles"
                     Log.e(DebugTags.BookingProcess, "Master vehicle API returned success=false")
@@ -246,6 +267,22 @@ class MasterVehicleViewModel @Inject constructor(
                 Math.sin(dLon / 2) * Math.sin(dLon / 2)
         val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
         return (R * c).toInt()
+    }
+
+    /**
+     * Creates a cache key based on ride data parameters that affect vehicle results
+     */
+    private fun createCacheKey(rideData: RideData): String {
+        return "${rideData.serviceType}_${rideData.pickupType}_${rideData.dropoffType}_${rideData.bookingHour}_${rideData.noOfPassenger}_${rideData.noOfLuggage}_${rideData.selectedPickupAirport}_${rideData.selectedDestinationAirport}"
+    }
+
+    /**
+     * Clears the cache (useful for testing or when data becomes stale)
+     */
+    fun clearCache() {
+        cachedVehicles.clear()
+        lastRideDataKey = null
+        Log.d(DebugTags.BookingProcess, "Master vehicle cache cleared")
     }
 }
 

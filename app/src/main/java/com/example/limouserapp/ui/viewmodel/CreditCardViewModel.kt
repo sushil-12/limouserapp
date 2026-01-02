@@ -316,7 +316,7 @@ class CreditCardViewModel @Inject constructor(
                         }
                     },
                     onFailure = { error ->
-                        val errorMessage = errorHandler.handleApiError(error)
+                        val errorMessage = errorHandler.handleError(error)
                         _uiState.value = currentState.copy(
                             isLoading = false,
                             error = errorMessage
@@ -325,7 +325,7 @@ class CreditCardViewModel @Inject constructor(
                     }
                 )
             } catch (e: Exception) {
-                val errorMessage = errorHandler.handleApiError(e)
+                val errorMessage = errorHandler.handleError(e)
                 _uiState.value = currentState.copy(
                     isLoading = false,
                     error = errorMessage

@@ -32,4 +32,5 @@ sealed class PhoneEntryUiEvent {
     data class CountryCodeChanged(val countryCode: CountryCode) : PhoneEntryUiEvent()
     object SendVerificationCode : PhoneEntryUiEvent()
     object ClearError : PhoneEntryUiEvent()
+    object ClearSuccess : PhoneEntryUiEvent()
 }

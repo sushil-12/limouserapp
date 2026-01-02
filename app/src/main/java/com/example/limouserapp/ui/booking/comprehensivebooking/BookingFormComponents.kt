@@ -1,5 +1,7 @@
 package com.example.limouserapp.ui.booking.comprehensivebooking
 
+import android.R.attr.delay
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,22 +24,29 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalTextInputService
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.limouserapp.R
+import com.example.limouserapp.ui.theme.GoogleSansFamily
 import com.example.limouserapp.ui.theme.LimoBlack
 import com.example.limouserapp.ui.theme.LimoOrange
+import kotlinx.coroutines.delay
 
 /**
  * Section Header - matches Gemini's design
  */
+
+private const val TAG = "EditableTextField"
 @Composable
 fun SectionHeader(title: String) {
     Text(
@@ -57,7 +66,11 @@ fun StyledDropdown(
     options: List<String>,
     expanded: Boolean,
     onExpand: (Boolean) -> Unit,
-    onSelect: (String) -> Unit
+    onSelect: (String) -> Unit,
+    isError: Boolean = false,
+    placeholder: String? = null,
+    isRequired: Boolean = false,
+    errorMessage: String? = null
 ) {
     Column {
         Text(label, style = TextStyle(fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold))
@@ -67,7 +80,7 @@ fun StyledDropdown(
                 .fillMaxWidth()
                 .height(50.dp)
                 .background(Color(0xFFF5F5F5), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                .border(1.dp, Color(0xFFE0E0E0), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                .border(1.dp, if (isError) Color.Red else Color(0xFFE0E0E0), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
                 .clickable { onExpand(true) }
                 .padding(horizontal = 16.dp),
             contentAlignment = Alignment.CenterStart
@@ -87,6 +100,16 @@ fun StyledDropdown(
                 }
             }
         }
+        // Show error message below field
+        if (errorMessage != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = errorMessage,
+                color = Color.Red,
+                fontSize = 12.sp,
+                fontFamily = GoogleSansFamily
+            )
+        }
     }
 }
 
@@ -98,55 +121,90 @@ fun StyledInput(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
-    keyboardType: KeyboardType = KeyboardType.Text
+    keyboardType: KeyboardType = KeyboardType.Text,
+    isError: Boolean = false,
+    placeholder: String?=null,
+    isRequired: Boolean = false,
+    errorMessage: String? = null
 ) {
-    val focusRequester = remember { FocusRequester() }
+    // 1. Hold internal state
+    var textFieldValueState by remember { mutableStateOf(TextFieldValue(text = value)) }
+
+    // 2. Track if we need to force "Select All" on the next update (fix for tap race condition)
     var isFocused by remember { mutableStateOf(false) }
-    var shouldSelectAll by remember { mutableStateOf(false) }
+    var pendingSelectionUpdate by remember { mutableStateOf(false) }
+
+    // 3. Sync external state
+    if (value != textFieldValueState.text) {
+        // Only update text, preserve selection unless it creates an invalid range
+        textFieldValueState = textFieldValueState.copy(text = value)
+    }
 
     Column {
-        Text(label, style = TextStyle(fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold))
+        Text(
+            label,
+            style = TextStyle(fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold)
+        )
         Spacer(Modifier.height(6.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp)
-                .background(Color(0xFFF5F5F5), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                .border(1.dp, Color(0xFFE0E0E0), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                .background(Color(0xFFF5F5F5), RoundedCornerShape(8.dp))
+                .border(1.dp, if (isError) Color.Red else Color(0xFFE0E0E0), RoundedCornerShape(8.dp))
                 .padding(horizontal = 16.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             BasicTextField(
-                value = TextFieldValue(
-                    text = value,
-                    selection = if (shouldSelectAll && value.isNotEmpty()) {
-                        androidx.compose.ui.text.TextRange(0, value.length)
-                    } else {
-                        androidx.compose.ui.text.TextRange(value.length)
+                value = textFieldValueState,
+                onValueChange = { newTfv ->
+                    var finalState = newTfv
+
+                    // THE FIX: If we have a pending selection update from a focus event,
+                    // and the text hasn't changed (meaning it's just a cursor move from the tap),
+                    // we enforce "Select All" and consume the flag.
+                    if (pendingSelectionUpdate) {
+                        if (newTfv.text == textFieldValueState.text) {
+                            finalState = newTfv.copy(
+                                selection = androidx.compose.ui.text.TextRange(0, newTfv.text.length)
+                            )
+                        }
+                        // Always clear the flag after the first interaction
+                        pendingSelectionUpdate = false
                     }
-                ),
-                onValueChange = { textFieldValue ->
-                    // Once user starts typing, disable select-all
-                    shouldSelectAll = false
-                    onValueChange(textFieldValue.text)
+
+                    textFieldValueState = finalState
+                    onValueChange(finalState.text)
                 },
                 textStyle = TextStyle(fontSize = 14.sp, color = LimoBlack),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .focusRequester(focusRequester)
                     .onFocusChanged { focusState ->
-                        val wasFocused = isFocused
-                        isFocused = focusState.isFocused
-                        // Select all text only on first focus, and only if field has content
-                        if (!wasFocused && focusState.isFocused && value.isNotEmpty()) {
-                            shouldSelectAll = true
-                        } else if (!focusState.isFocused) {
-                            // Reset select-all flag when field loses focus
-                            shouldSelectAll = false
+                        if (focusState.isFocused != isFocused) {
+                            isFocused = focusState.isFocused
+                            if (isFocused) {
+                                // 1. Set flag to intercept the subsequent tap-cursor-placement
+                                pendingSelectionUpdate = true
+                                // 2. Immediate update for non-touch focus (e.g. keyboard navigation)
+                                textFieldValueState = textFieldValueState.copy(
+                                    selection = androidx.compose.ui.text.TextRange(0, textFieldValueState.text.length)
+                                )
+                            }
                         }
                     },
                 keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-                singleLine = true
+                singleLine = true,
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(LimoOrange)
+            )
+        }
+        // Show error message below field
+        if (errorMessage != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = errorMessage,
+                color = Color.Red,
+                fontSize = 12.sp,
+                fontFamily = GoogleSansFamily
             )
         }
     }
@@ -162,77 +220,91 @@ fun EditableTextField(
     onValueChange: (String) -> Unit,
     keyboardType: KeyboardType = KeyboardType.Text,
     modifier: Modifier = Modifier,
-    labelFontSize: androidx.compose.ui.unit.TextUnit = 12.sp,
-    textFontSize: androidx.compose.ui.unit.TextUnit = 16.sp,
+    labelFontSize: TextUnit = 12.sp,
+    textFontSize: TextUnit = 16.sp,
     error: String? = null,
     onErrorCleared: (() -> Unit)? = null
 ) {
-    val focusRequester = remember { FocusRequester() }
-    var isFocused by remember { mutableStateOf(false) }
-    var shouldSelectAll by remember { mutableStateOf(false) }
+    // 1. Internal State
+    var textFieldValueState by remember { mutableStateOf(TextFieldValue(text = value)) }
 
-    // Store callback to avoid scoping issues
+    // 2. Focus State
+    var isFocused by remember { mutableStateOf(false) }
+
+    // 3. Sync External Changes
+    if (value != textFieldValueState.text) {
+        textFieldValueState = textFieldValueState.copy(text = value)
+    }
+
+    // 4. FIX: Use LaunchedEffect to handle the race condition
+    LaunchedEffect(isFocused) {
+        if (isFocused) {
+            Log.d(TAG, "[$label] Focus gained. Waiting for touch event to settle...")
+
+            // Wait 50ms to allow the native touch event (which places the cursor) to finish
+            delay(50)
+
+            // Now overwrite the selection
+            val textLength = textFieldValueState.text.length
+            if (textLength > 0) {
+                textFieldValueState = textFieldValueState.copy(
+                    selection = androidx.compose.ui.text.TextRange(0, textLength)
+                )
+                Log.d(TAG, "[$label] SELECT ALL applied (0 to $textLength)")
+            }
+        }
+    }
+
     val errorClearCallback = remember(onErrorCleared) { onErrorCleared }
-    
+
     Column(modifier = modifier) {
-        Text(label, style = TextStyle(fontSize = labelFontSize, color = Color.Gray, fontWeight = FontWeight.SemiBold))
+        Text(
+            label,
+            style = TextStyle(fontSize = labelFontSize, color = Color.Gray, fontWeight = FontWeight.SemiBold, fontFamily = GoogleSansFamily)
+        )
         Spacer(Modifier.height(6.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(50.dp)
-                .background(Color(0xFFF5F5F5), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                .background(Color(0xFFF5F5F5), RoundedCornerShape(8.dp))
                 .border(
                     1.dp,
                     if (error != null) Color.Red else Color(0xFFE0E0E0),
-                    androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                    RoundedCornerShape(8.dp)
                 )
                 .padding(horizontal = 16.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             BasicTextField(
-                value = TextFieldValue(
-                    text = value,
-                    selection = if (shouldSelectAll && value.isNotEmpty()) {
-                        androidx.compose.ui.text.TextRange(0, value.length)
-                    } else {
-                        androidx.compose.ui.text.TextRange(value.length)
-                    }
-                ),
-                onValueChange = { textFieldValue ->
-                    // Once user starts typing, disable select-all and clear error
-                    shouldSelectAll = false
+                value = textFieldValueState,
+                onValueChange = { newTfv ->
+                    textFieldValueState = newTfv
                     errorClearCallback?.invoke()
-                    onValueChange(textFieldValue.text)
+                    onValueChange(newTfv.text)
                 },
-                textStyle = TextStyle(fontSize = textFontSize, color = LimoBlack),
+                textStyle = TextStyle(fontSize = textFontSize, color = LimoBlack, fontFamily = GoogleSansFamily),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .focusRequester(focusRequester)
                     .onFocusChanged { focusState ->
-                        val wasFocused = isFocused
-                        isFocused = focusState.isFocused
-                        // Select all text only on first focus, and only if field has content
-                        if (!wasFocused && focusState.isFocused && value.isNotEmpty()) {
-                            shouldSelectAll = true
-                        } else if (!focusState.isFocused) {
-                            // Reset select-all flag when field loses focus
-                            shouldSelectAll = false
+                        if (isFocused != focusState.isFocused) {
+                            isFocused = focusState.isFocused
+                            Log.d(TAG, "[$label] Focus State Changed: $isFocused")
                         }
                     },
                 keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-                singleLine = true
+                singleLine = true,
+                cursorBrush = SolidColor(LimoBlack)
             )
         }
 
-        // Error message
-        error?.let { errorMessage ->
+        if (error != null) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = errorMessage,
+                text = error,
                 color = Color.Red,
                 fontSize = 12.sp,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif
+                fontFamily = GoogleSansFamily
             )
         }
     }
@@ -322,7 +394,9 @@ fun EditableField(
     value: String,
     onClick: (() -> Unit)?,
     icon: ImageVector? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
+    errorMessage: String? = null
 ) {
     Column(modifier = modifier) {
         Text(label, style = TextStyle(fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold))
@@ -334,7 +408,7 @@ fun EditableField(
                     .fillMaxWidth()
                     .height(50.dp)
                     .background(Color(0xFFF5F5F5), RoundedCornerShape(8.dp))
-                    .border(1.dp, Color(0xFFE0E0E0), RoundedCornerShape(8.dp))
+                    .border(1.dp, if (isError) Color.Red else Color(0xFFE0E0E0), RoundedCornerShape(8.dp))
                     .clickable(onClick = onClick)
                     .padding(horizontal = 16.dp),
                 contentAlignment = Alignment.CenterStart
@@ -365,6 +439,16 @@ fun EditableField(
                         )
                     }
                 }
+            }
+            
+            // Show error message below field if present
+            if (isError && errorMessage != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = errorMessage,
+                    style = TextStyle(fontSize = 12.sp, color = Color.Red),
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
             }
         } else {
             Box(

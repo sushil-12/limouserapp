@@ -1,12 +1,12 @@
 package com.example.limouserapp.ui.booking
 
+import android.content.Context
+import android.location.Geocoder
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.*
-import androidx.compose.animation.expandVertically
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,16 +17,21 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Flight
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -42,18 +47,20 @@ import com.example.limouserapp.data.PlacesService
 import com.example.limouserapp.data.model.booking.*
 import com.example.limouserapp.ui.booking.components.*
 import com.example.limouserapp.ui.theme.*
-import com.example.limouserapp.ui.utils.DebugTags
 import com.example.limouserapp.ui.viewmodel.ScheduleRideViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
-/**
- * Events for Schedule Ride Bottom Sheet
- */
+// ==========================================
+// Events
+// ==========================================
 data class ScheduleRideEvents(
     val onRideTypeSelected: (RideType) -> Unit,
     val onBookingTypeSelected: (BookingType) -> Unit,
@@ -75,9 +82,8 @@ data class ScheduleRideEvents(
 )
 
 // ==========================================
-// Main Screen Composable (Business Logic)
+// Main Screen Controller
 // ==========================================
-
 @Composable
 fun ScheduleRideScreen(
     onDismiss: () -> Unit,
@@ -92,472 +98,296 @@ fun ScheduleRideScreen(
     val viewModel: ScheduleRideViewModel = hiltViewModel()
     val airportService = viewModel.airportService
     val recentLocationService = viewModel.recentLocationService
+    val locationManager = viewModel.locationManager
     val coroutineScope = rememberCoroutineScope()
 
-    // Recent locations state
-    val pickupRecentLocations by recentLocationService.pickupLocations.collectAsStateWithLifecycle()
-    val dropoffRecentLocations by recentLocationService.dropoffLocations.collectAsStateWithLifecycle()
-    val isLoadingRecentLocations by recentLocationService.isLoading.collectAsStateWithLifecycle()
+    // State Variables
+    // hasAutoNavigated is now managed in ViewModel - consume as one-time guard
+    val hasAutoNavigated by viewModel.hasAutoNavigated.collectAsStateWithLifecycle()
 
-    // Core states - restore from initialRideData if available
-    var selectedRideType by remember(initialRideData) {
+    var selectedRideType by rememberSaveable {
         mutableStateOf(initialRideData?.let { RideType.fromServiceType(it.serviceType) } ?: RideType.ONE_WAY)
     }
-    var selectedBookingType by remember(initialRideData) {
+    var selectedBookingType by rememberSaveable {
         mutableStateOf(initialRideData?.let { BookingType.fromPickupType(it.pickupType) } ?: BookingType.CITY_FBO)
     }
-    var selectedDestinationType by remember(initialRideData) {
+    var selectedDestinationType by rememberSaveable {
         mutableStateOf(initialRideData?.let { BookingType.fromPickupType(it.dropoffType) } ?: BookingType.AIRPORT)
     }
-    var selectedHours by remember(initialRideData) {
+    var selectedHours by rememberSaveable {
         mutableStateOf(initialRideData?.bookingHour?.let { "$it hours minimum" } ?: "2 hours minimum")
     }
 
-    var pickupLocation by remember(initialRideData) {
-        mutableStateOf(initialRideData?.pickupLocation ?: "")
-    }
-    var destinationLocation by remember(initialRideData) {
-        mutableStateOf(initialRideData?.destinationLocation ?: "")
-    }
-    var selectedPickupAirport by remember(initialRideData) {
-        mutableStateOf(initialRideData?.selectedPickupAirport ?: "")
-    }
-    var selectedDestinationAirport by remember(initialRideData) {
-        mutableStateOf(initialRideData?.selectedDestinationAirport ?: "")
-    }
-    var pickupAirportSearch by remember(initialRideData) {
-        mutableStateOf(initialRideData?.selectedPickupAirport ?: "")
-    }
-    var destinationAirportSearch by remember(initialRideData) {
-        mutableStateOf(initialRideData?.selectedDestinationAirport ?: "")
-    }
+    // Text Fields
+    var pickupLocation by rememberSaveable { mutableStateOf(initialRideData?.pickupLocation ?: initialAddress ?: "") }
+    var destinationLocation by rememberSaveable { mutableStateOf(initialRideData?.destinationLocation ?: "") }
+    var selectedPickupAirport by rememberSaveable { mutableStateOf(initialRideData?.selectedPickupAirport ?: "") }
+    var selectedDestinationAirport by rememberSaveable { mutableStateOf(initialRideData?.selectedDestinationAirport ?: "") }
 
-    var pickupCoordinate by remember(initialRideData) {
+    // Coordinates - Save as separate values to persist across navigation
+    var pickupLat by rememberSaveable { mutableStateOf(initialRideData?.pickupLat ?: initialLocation?.latitude ?: 0.0) }
+    var pickupLong by rememberSaveable { mutableStateOf(initialRideData?.pickupLong ?: initialLocation?.longitude ?: 0.0) }
+    var pickupCountryCode by rememberSaveable { mutableStateOf(initialRideData?.pickupCountryCode ?: initialLocation?.countryCode) }
+    var pickupPostalCode by rememberSaveable { mutableStateOf(initialRideData?.pickupPostalCode ?: initialLocation?.postalCode) }
+    
+    var destLat by rememberSaveable { mutableStateOf(initialRideData?.destinationLat ?: 0.0) }
+    var destLong by rememberSaveable { mutableStateOf(initialRideData?.destinationLong ?: 0.0) }
+    var destCountryCode by rememberSaveable { mutableStateOf(initialRideData?.destinationCountryCode) }
+    var destPostalCode by rememberSaveable { mutableStateOf(initialRideData?.destinationPostalCode) }
+    
+    // Reconstruct LocationCoordinate from saved values
+    var pickupCoordinate by remember(pickupLat, pickupLong, pickupCountryCode, pickupPostalCode) {
         mutableStateOf<LocationCoordinate?>(
-            initialRideData?.let {
-                if (it.pickupLat != null && it.pickupLong != null) {
-                    LocationCoordinate(it.pickupLat, it.pickupLong)
-                } else null
-            } ?: null
+            if (pickupLat != 0.0 && pickupLong != 0.0) {
+                LocationCoordinate(pickupLat, pickupLong, pickupCountryCode, pickupPostalCode)
+            } else null
         )
     }
-    var destinationCoordinate by remember(initialRideData) {
+    var destinationCoordinate by remember(destLat, destLong, destCountryCode, destPostalCode) {
         mutableStateOf<LocationCoordinate?>(
-            initialRideData?.let {
-                if (it.destinationLat != null && it.destinationLong != null) {
-                    LocationCoordinate(it.destinationLat, it.destinationLong)
-                } else null
-            } ?: null
+            if (destLat != 0.0 && destLong != 0.0) {
+                LocationCoordinate(destLat, destLong, destCountryCode, destPostalCode)
+            } else null
         )
     }
 
-    // Suggestions
-    var showPickupSuggestions by remember { mutableStateOf(false) }
-    var showDestinationSuggestions by remember { mutableStateOf(false) }
+    // Search/UI States
+    var showPickupSuggestions by rememberSaveable { mutableStateOf(false) }
+    var showDestinationSuggestions by rememberSaveable { mutableStateOf(false) }
+    var pickupAirportSearch by rememberSaveable { mutableStateOf("") }
+    var destinationAirportSearch by rememberSaveable { mutableStateOf("") }
+    var focusedField by rememberSaveable { mutableStateOf<String?>(null) }
+    var isValidating by remember { mutableStateOf(false) } // Shows loading spinner
+    var isNavigatingToTimeSelection by remember { mutableStateOf(false) } // Prevents multiple navigations
+    var invalidLocationMessage by remember { mutableStateOf("") }
+    var showInvalidLocationDialog by remember { mutableStateOf(false) }
+
+    // Data Lists
     var pickupPredictions by remember { mutableStateOf<List<PlacePrediction>>(emptyList()) }
     var destinationPredictions by remember { mutableStateOf<List<PlacePrediction>>(emptyList()) }
-    var focusedField by remember { mutableStateOf<String?>(null) }
-
-    var pickupSearchJob by remember { mutableStateOf<Job?>(null) }
-    var destinationSearchJob by remember { mutableStateOf<Job?>(null) }
-
-    // Error state
-    var showInvalidLocationDialog by remember { mutableStateOf(false) }
-    var invalidLocationMessage by remember { mutableStateOf("") }
-
     val airportSuggestions by airportService.suggestions.collectAsStateWithLifecycle()
+    val pickupRecentLocations by recentLocationService.pickupLocations.collectAsStateWithLifecycle()
+    val dropoffRecentLocations by recentLocationService.dropoffLocations.collectAsStateWithLifecycle()
+    val isLoadingRecent by recentLocationService.isLoading.collectAsStateWithLifecycle()
     val isLoadingAirports by airportService.isLoading.collectAsStateWithLifecycle()
 
-    // Observe navigation back stack for results from MapLocationPickerScreen
-    LaunchedEffect(navController.currentBackStackEntry) {
-        val savedStateHandle = navController.currentBackStackEntry?.savedStateHandle
-        val resultKey = savedStateHandle?.get<String>("map_picker_result_key")
-        val selectedLocationFromMap = savedStateHandle?.get<LocationCoordinate>("selected_location")
-        val selectedAddressFromMap = savedStateHandle?.get<String>("selected_address")
+    // Search Jobs
+    var searchJob by remember { mutableStateOf<Job?>(null) }
 
-        if (resultKey != null && selectedLocationFromMap != null && selectedAddressFromMap != null) {
-            when (resultKey) {
-                "pickup" -> {
-                    pickupLocation = selectedAddressFromMap
-                    pickupCoordinate = selectedLocationFromMap
-                    showPickupSuggestions = false
-                    focusedField = null
-                }
-                "destination" -> {
-                    destinationLocation = selectedAddressFromMap
-                    destinationCoordinate = selectedLocationFromMap
-                    showDestinationSuggestions = false
-                    focusedField = null
-                }
-            }
-            // Trigger validation after map selection
-            val validationError = getLocationValidationError(
-                pickupLocation,
-                destinationLocation,
-                selectedPickupAirport,
-                selectedDestinationAirport,
-                pickupCoordinate,
-                destinationCoordinate,
-                selectedBookingType,
-                selectedDestinationType,
-                placesService
-            )
-            if (validationError != null) {
-                invalidLocationMessage = validationError
-                showInvalidLocationDialog = true
-            }
+    // Keyboard instances
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
-            savedStateHandle.remove<String>("map_picker_result_key")
-            savedStateHandle.remove<LocationCoordinate>("selected_location")
-            savedStateHandle.remove<String>("selected_address")
-        }
-    }
 
-    // Computed values
-    val pickupText = remember(selectedBookingType, selectedPickupAirport, pickupLocation) {
-        derivedStateOf { if (selectedBookingType == BookingType.AIRPORT) selectedPickupAirport else pickupLocation }
-    }.value
+    // --- LOGIC: MAP NAVIGATION HELPER ---
+    suspend fun navigateToMap(isPickup: Boolean) {
+        val coord = if (isPickup) pickupCoordinate else destinationCoordinate
+        val addr = if (isPickup) pickupLocation else destinationLocation
+        val key = if (isPickup) "pickup" else "destination"
 
-    val destinationText = remember(selectedDestinationType, selectedDestinationAirport, destinationLocation) {
-        derivedStateOf { if (selectedDestinationType == BookingType.AIRPORT) selectedDestinationAirport else destinationLocation }
-    }.value
-
-    val pickupSearchValue = remember(selectedBookingType, pickupAirportSearch, pickupLocation) {
-        derivedStateOf { if (selectedBookingType == BookingType.AIRPORT) pickupAirportSearch else pickupLocation }
-    }.value
-
-    val destinationSearchValue = remember(selectedDestinationType, destinationAirportSearch, destinationLocation) {
-        derivedStateOf { if (selectedDestinationType == BookingType.AIRPORT) destinationAirportSearch else destinationLocation }
-    }.value
-
-    val bothLocationsFilled = remember(pickupLocation, selectedPickupAirport, destinationLocation, selectedDestinationAirport) {
-        derivedStateOf {
-            (pickupLocation.isNotEmpty() || selectedPickupAirport.isNotEmpty()) &&
-                    (destinationLocation.isNotEmpty() || selectedDestinationAirport.isNotEmpty())
-        }
-    }.value
-
-    val hasValidCoordinates = remember(pickupCoordinate, destinationCoordinate) {
-        derivedStateOf { pickupCoordinate != null && destinationCoordinate != null }
-    }.value
-
-    // Callback functions
-    val onPickupSuggestionSelected: (PlacePrediction) -> Unit = { prediction ->
-        pickupLocation = prediction.primaryText
-        pickupPredictions = emptyList()
-        showPickupSuggestions = false
-        coroutineScope.launch {
-            val details = placesService.getPlaceDetails(prediction.placeId)
-            details?.let {
-                pickupCoordinate = LocationCoordinate(it.latitude ?: 0.0, it.longitude ?: 0.0, it.country, it.postalCode)
-            }
-        }
-    }
-
-    val onDestinationSuggestionSelected: (PlacePrediction) -> Unit = { prediction ->
-        destinationLocation = prediction.primaryText
-        destinationPredictions = emptyList()
-        showDestinationSuggestions = false
-        coroutineScope.launch {
-            val details = placesService.getPlaceDetails(prediction.placeId)
-            details?.let {
-                destinationCoordinate = LocationCoordinate(it.latitude ?: 0.0, it.longitude ?: 0.0, it.country, it.postalCode)
-                if (pickupCoordinate != null) {
-                    createAndNavigateToTimeSelection(
-                        selectedRideType, selectedBookingType, selectedDestinationType,
-                        pickupLocation, destinationLocation, selectedPickupAirport, selectedDestinationAirport,
-                        pickupCoordinate, destinationCoordinate, selectedHours, onNavigateToTimeSelection
-                    )
-                }
-            }
-        }
-    }
-
-    val onPickupAirportSelected: (String) -> Unit = { airportName ->
-        selectedPickupAirport = airportName
-        pickupAirportSearch = airportName
-        val airport = airportService.selectAirportSuggestion(airportName)
-        airport?.let {
-            pickupCoordinate = LocationCoordinate(it.lat ?: 0.0, it.long ?: 0.0, null, null)
-        }
-        showPickupSuggestions = false
-    }
-
-    val onDestinationAirportSelected: (String) -> Unit = { airportName ->
-        selectedDestinationAirport = airportName
-        destinationAirportSearch = airportName
-        val airport = airportService.selectAirportSuggestion(airportName)
-        airport?.let {
-            destinationCoordinate = LocationCoordinate(it.lat ?: 0.0, it.long ?: 0.0, null, null)
-            if (pickupCoordinate != null) {
-                createAndNavigateToTimeSelection(
-                    selectedRideType, selectedBookingType, selectedDestinationType,
-                    pickupLocation, destinationLocation, selectedPickupAirport, selectedDestinationAirport,
-                    pickupCoordinate, destinationCoordinate, selectedHours, onNavigateToTimeSelection
-                )
-            }
-        }
-        showDestinationSuggestions = false
-    }
-
-    val onPickupRecentLocationSelected: (RecentLocation) -> Unit = { location ->
-        if (location.isAirport) {
-            selectedPickupAirport = location.airportName ?: location.address
-            pickupAirportSearch = location.airportName ?: location.address
+        // Default to current location if nothing selected
+        val (lat, lng, address) = if (coord != null) {
+            Triple(coord.latitude, coord.longitude, addr)
         } else {
-            pickupLocation = location.address
+            val current = locationManager.getCurrentLocation().getOrNull()
+            if (current != null) Triple(current.latitude, current.longitude, current.address)
+            else Triple(0.0, 0.0, "")
         }
-        pickupCoordinate = location.toLocationCoordinate()
-        showPickupSuggestions = false
-        recentLocationService.clearPickupLocations()
+
+        navController.currentBackStackEntry?.savedStateHandle?.set("map_picker_result_key", key)
+        navController.navigate("mapLocationPicker?initialLat=$lat&initialLong=$lng&initialAddress=$address")
     }
 
-    val onDestinationRecentLocationSelected: (RecentLocation) -> Unit = { location ->
-        if (location.isAirport) {
-            selectedDestinationAirport = location.airportName ?: location.address
-            destinationAirportSearch = location.airportName ?: location.address
-        } else {
-            destinationLocation = location.address
-        }
-        destinationCoordinate = location.toLocationCoordinate()
-        showDestinationSuggestions = false
-        recentLocationService.clearDropoffLocations()
-        if (pickupCoordinate != null) {
-            createAndNavigateToTimeSelection(
-                selectedRideType, selectedBookingType, selectedDestinationType,
-                pickupLocation, destinationLocation, selectedPickupAirport, selectedDestinationAirport,
-                pickupCoordinate, destinationCoordinate, selectedHours, onNavigateToTimeSelection
-            )
-        }
-    }
-
-    // Create state object
-    val state = remember(
-        selectedRideType, selectedBookingType, selectedDestinationType,
-        pickupLocation, destinationLocation, selectedPickupAirport, selectedDestinationAirport,
-        pickupAirportSearch, destinationAirportSearch, pickupCoordinate, destinationCoordinate,
-        showPickupSuggestions, showDestinationSuggestions, pickupPredictions, destinationPredictions,
-        airportSuggestions, isLoadingAirports, focusedField, selectedHours
+    suspend fun executeValidationAndNext(
+        pCoord: LocationCoordinate?,
+        dCoord: LocationCoordinate?,
+        pText: String,
+        dText: String
     ) {
-        ScheduleRideState(
-            selectedRideType = selectedRideType,
-            selectedBookingType = selectedBookingType,
-            selectedDestinationType = selectedDestinationType,
-            pickupLocation = pickupLocation,
-            destinationLocation = destinationLocation,
-            selectedPickupAirport = selectedPickupAirport,
-            selectedDestinationAirport = selectedDestinationAirport,
-            pickupAirportSearch = pickupAirportSearch,
-            destinationAirportSearch = destinationAirportSearch,
-            pickupCoordinate = pickupCoordinate,
-            destinationCoordinate = destinationCoordinate,
-            showPickupSuggestions = showPickupSuggestions,
-            showDestinationSuggestions = showDestinationSuggestions,
-            pickupPredictions = pickupPredictions,
-            destinationPredictions = destinationPredictions,
-            airportSuggestions = airportSuggestions,
-            isLoadingAirports = isLoadingAirports,
-            focusedField = focusedField,
-            selectedHours = selectedHours
+        if (isNavigatingToTimeSelection) return
+
+        if (pCoord == null || dCoord == null) return
+        if (showPickupSuggestions || showDestinationSuggestions) return
+
+        val latDiff = kotlin.math.abs(pCoord.latitude - dCoord.latitude)
+        val longDiff = kotlin.math.abs(pCoord.longitude - dCoord.longitude)
+        if (latDiff < 0.0001 && longDiff < 0.0001) {
+            invalidLocationMessage = "Pickup and destination cannot be the same location"
+            showInvalidLocationDialog = true
+            return
+        }
+
+        isNavigatingToTimeSelection = true
+        isValidating = true
+
+        val error = getLocationValidationError(context, pCoord, dCoord)
+
+        isValidating = false
+
+        if (error != null) {
+            invalidLocationMessage = error
+            showInvalidLocationDialog = true
+            isNavigatingToTimeSelection = false
+            return
+        }
+
+        val now = Date()
+        val rideData = RideData(
+            serviceType = selectedRideType.toServiceType(),
+            bookingHour = selectedHours.replace(" hours minimum", "").trim(),
+            pickupType = selectedBookingType.toPickupType(),
+            dropoffType = selectedDestinationType.toPickupType(),
+            pickupDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(now),
+            pickupTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(now),
+            pickupLocation = pText,
+            destinationLocation = dText,
+            selectedPickupAirport = if (selectedBookingType == BookingType.AIRPORT) pText else "",
+            selectedDestinationAirport = if (selectedDestinationType == BookingType.AIRPORT) dText else "",
+            noOfPassenger = 1,
+            noOfLuggage = 1,
+            noOfVehicles = 1,
+            pickupLat = pCoord.latitude,
+            pickupLong = pCoord.longitude,
+            destinationLat = dCoord.latitude,
+            destinationLong = dCoord.longitude,
+            pickupCountryCode = pCoord.countryCode,
+            destinationCountryCode = dCoord.countryCode,
+            pickupPostalCode = pCoord.postalCode,
+            destinationPostalCode = dCoord.postalCode
         )
+
+        delay(80) // let keyboard + UI settle
+        onNavigateToTimeSelection(rideData)
     }
 
-    // Create events object
-    val events = remember(coroutineScope, placesService, airportService, onNavigateToTimeSelection, navController) {
-        ScheduleRideEvents(
-            onRideTypeSelected = { selectedRideType = it },
-            onBookingTypeSelected = { selectedBookingType = it },
-            onDestinationTypeSelected = { selectedDestinationType = it },
-            onPickupValueChange = { newValue ->
-                if (selectedBookingType == BookingType.AIRPORT) {
-                    pickupAirportSearch = newValue
-                    if (newValue.length >= 2) {
-                        showPickupSuggestions = true
-                        coroutineScope.launch { airportService.searchAirports(newValue) }
-                    } else {
-                        showPickupSuggestions = true
-                        coroutineScope.launch { airportService.fetchInitialAirports() }
-                    }
-                } else {
-                    pickupLocation = newValue
-                    pickupSearchJob?.cancel()
-                    pickupSearchJob = coroutineScope.launch {
-                        delay(300)
-                        if (newValue.length >= 2) {
-                            pickupPredictions = placesService.getPlacePredictions(newValue)
-                            showPickupSuggestions = true
-                        } else {
-                            pickupPredictions = emptyList()
-                            showPickupSuggestions = false
-                        }
-                    }
-                }
-            },
-            onDestinationValueChange = { newValue ->
-                if (selectedDestinationType == BookingType.AIRPORT) {
-                    destinationAirportSearch = newValue
-                    if (newValue.length >= 2) {
-                        showDestinationSuggestions = true
-                        coroutineScope.launch { airportService.searchAirports(newValue) }
-                    } else {
-                        showDestinationSuggestions = true
-                        coroutineScope.launch { airportService.fetchInitialAirports() }
-                    }
-                } else {
-                    destinationLocation = newValue
-                    destinationSearchJob?.cancel()
-                    destinationSearchJob = coroutineScope.launch {
-                        delay(300)
-                        if (newValue.length >= 2) {
-                            destinationPredictions = placesService.getPlacePredictions(newValue)
-                            showDestinationSuggestions = true
-                        } else {
-                            destinationPredictions = emptyList()
-                            showDestinationSuggestions = false
-                        }
-                    }
-                }
-            },
-            onPickupFocusChanged = { isFocused ->
-                if (isFocused) {
-                    focusedField = "pickup"
-                    showDestinationSuggestions = false
-                    if (selectedBookingType == BookingType.AIRPORT) {
-                        showPickupSuggestions = true
-                        if (pickupAirportSearch.length < 2) coroutineScope.launch { airportService.fetchInitialAirports() }
-                    } else {
-                        if (pickupLocation.length >= 2 && pickupPredictions.isEmpty()) {
-                            coroutineScope.launch {
-                                pickupPredictions = placesService.getPlacePredictions(pickupLocation)
-                                showPickupSuggestions = true
-                            }
-                        } else if (pickupLocation.isEmpty() || pickupLocation.length <= 2) {
-                            coroutineScope.launch { recentLocationService.fetchRecentLocations("pickup") }
-                        }
-                    }
-                }
-            },
-            onDestinationFocusChanged = { isFocused ->
-                if (isFocused) {
-                    focusedField = "destination"
-                    showPickupSuggestions = false
-                    if (selectedDestinationType == BookingType.AIRPORT) {
-                        showDestinationSuggestions = true
-                        if (destinationAirportSearch.length < 2) coroutineScope.launch { airportService.fetchInitialAirports() }
-                    } else {
-                        if (destinationLocation.length >= 2 && destinationPredictions.isEmpty()) {
-                            coroutineScope.launch {
-                                destinationPredictions = placesService.getPlacePredictions(destinationLocation)
-                                showDestinationSuggestions = true
-                            }
-                        } else if (destinationLocation.isEmpty() || destinationLocation.length <= 2) {
-                            coroutineScope.launch { recentLocationService.fetchRecentLocations("dropoff") }
-                        }
-                    }
-                }
-            },
-            onPickupClear = {
-                if (selectedBookingType == BookingType.AIRPORT) {
-                    pickupAirportSearch = ""
-                    selectedPickupAirport = ""
-                } else {
-                    pickupLocation = ""
-                }
-            },
-            onDestinationClear = {
-                if (selectedDestinationType == BookingType.AIRPORT) {
-                    destinationAirportSearch = ""
-                    selectedDestinationAirport = ""
-                } else {
-                    destinationLocation = ""
-                }
-            },
-            onPickupSuggestionSelected = onPickupSuggestionSelected,
-            onDestinationSuggestionSelected = onDestinationSuggestionSelected,
-            onPickupAirportSelected = onPickupAirportSelected,
-            onDestinationAirportSelected = onDestinationAirportSelected,
-            onNext = {
-                coroutineScope.launch {
-                    val validationError = getLocationValidationError(
-                        pickupLocation, destinationLocation, selectedPickupAirport, selectedDestinationAirport,
-                        pickupCoordinate, destinationCoordinate, selectedBookingType, selectedDestinationType, placesService
-                    )
 
-                    if (validationError != null) {
-                        invalidLocationMessage = validationError
-                        showInvalidLocationDialog = true
-                    } else {
-                        createAndNavigateToTimeSelection(
-                            selectedRideType, selectedBookingType, selectedDestinationType,
-                            pickupLocation, destinationLocation, selectedPickupAirport, selectedDestinationAirport,
-                            pickupCoordinate, destinationCoordinate, selectedHours, onNavigateToTimeSelection
+    // --- LOGIC: CHECK IF PLACE IS AIRPORT ---
+    fun isAirportPlace(placeTypes: List<String>?): Boolean {
+        if (placeTypes == null) return false
+        return placeTypes.any { type ->
+            type.contains("AIRPORT", ignoreCase = true) ||
+            type.contains("AERODROME", ignoreCase = true)
+        }
+    }
+
+    // --- LOGIC: HANDLE ANY SELECTION (Map, List, Recent) ---
+    fun handleLocationSelection(
+        isPickup: Boolean,
+        text: String,
+        coordinate: LocationCoordinate?,
+        placeTypes: List<String>? = null
+    ) {
+        // Reset suggestions and focused field to show the Continue button
+        showPickupSuggestions = false
+        showDestinationSuggestions = false
+        focusedField = null
+
+        // Reset auto-navigation guard when location selection changes
+        if (hasAutoNavigated) {
+            viewModel.resetAutoNavigationGuard()
+        }
+
+        // Auto-detect airport and set booking type
+        val isAirport = isAirportPlace(placeTypes)
+        if (isAirport) {
+            if (isPickup) {
+                selectedBookingType = BookingType.AIRPORT
+                selectedPickupAirport = text
+            } else {
+                selectedDestinationType = BookingType.AIRPORT
+                selectedDestinationAirport = text
+            }
+        }
+
+        // Update location state
+        if (isPickup) {
+            pickupLocation = text
+            if (coordinate != null) {
+                pickupLat = coordinate.latitude
+                pickupLong = coordinate.longitude
+                pickupCountryCode = coordinate.countryCode
+                pickupPostalCode = coordinate.postalCode
+            }
+            pickupCoordinate = coordinate
+        } else {
+            destinationLocation = text
+            if (coordinate != null) {
+                destLat = coordinate.latitude
+                destLong = coordinate.longitude
+                destCountryCode = coordinate.countryCode
+                destPostalCode = coordinate.postalCode
+            }
+            destinationCoordinate = coordinate
+        }
+    }
+    
+    // --- AUTO-NAVIGATION: Automatically proceed when both locations are selected ---
+    LaunchedEffect(
+        pickupCoordinate,
+        destinationCoordinate,
+        hasAutoNavigated
+    ) {
+        // One-time navigation guard - check ViewModel state
+        if (hasAutoNavigated) return@LaunchedEffect
+        if (showPickupSuggestions || showDestinationSuggestions) return@LaunchedEffect
+
+        val p = pickupCoordinate
+        val d = destinationCoordinate
+
+        if (p == null || d == null) return@LaunchedEffect
+        if (p.latitude == 0.0 || p.longitude == 0.0) return@LaunchedEffect
+        if (d.latitude == 0.0 || d.longitude == 0.0) return@LaunchedEffect
+
+        val sameLocation =
+            kotlin.math.abs(p.latitude - d.latitude) < 0.0001 &&
+                    kotlin.math.abs(p.longitude - d.longitude) < 0.0001
+
+        if (sameLocation) return@LaunchedEffect
+
+        // ✅ Mark as auto-navigated in ViewModel (one-time guard)
+        viewModel.markAutoNavigated()
+
+        // 🔽 CLOSE KEYBOARD FIRST (smooth UX)
+        keyboardController?.hide()
+        focusManager.clearFocus(force = true)
+
+        // (Optional but recommended)
+        delay(80) // allows keyboard animation to start
+
+        // 🚀 Navigate
+        executeValidationAndNext(p, d, pickupLocation, destinationLocation)
+    }
+
+
+    // --- EFFECT: MAP RESULT LISTENER ---
+    val currentBackStackEntry = navController.currentBackStackEntry
+    LaunchedEffect(currentBackStackEntry) {
+        currentBackStackEntry?.savedStateHandle?.let { handle ->
+            handle.getStateFlow<String?>("map_picker_result_key", null).collect { resultKey ->
+                if (resultKey != null) {
+                    val loc = handle.get<LocationCoordinate>("selected_location")
+                    val addr = handle.get<String>("selected_address") ?: ""
+
+                    if (loc != null) {
+                        handle.remove<String>("map_picker_result_key")
+                        handle.remove<LocationCoordinate>("selected_location")
+                        handle.remove<String>("selected_address")
+
+                        // For map selection, we don't have place types, so pass null
+                        // User can manually change booking type if needed
+                        handleLocationSelection(
+                            isPickup = (resultKey == "pickup"),
+                            text = addr,
+                            coordinate = loc,
+                            placeTypes = null
                         )
                     }
                 }
-            },
-            onDismiss = onDismiss,
-            onPickupMapClick = {
-                navController.currentBackStackEntry?.savedStateHandle?.set("map_picker_result_key", "pickup")
-                navController.navigate("mapLocationPicker?initialLat=${pickupCoordinate?.latitude}&initialLong=${pickupCoordinate?.longitude}&initialAddress=${pickupLocation}")
-            },
-            onDestinationMapClick = {
-                navController.currentBackStackEntry?.savedStateHandle?.set("map_picker_result_key", "destination")
-                navController.navigate("mapLocationPicker?initialLat=${destinationCoordinate?.latitude}&initialLong=${destinationCoordinate?.longitude}&initialAddress=${destinationLocation}")
             }
-        )
+        }
     }
 
-    ScheduleRideScreenContent(
-        state = state,
-        events = events,
-        pickupText = pickupText,
-        destinationText = destinationText,
-        pickupSearchValue = pickupSearchValue,
-        destinationSearchValue = destinationSearchValue,
-        bothLocationsFilled = bothLocationsFilled,
-        hasValidCoordinates = hasValidCoordinates,
-        pickupRecentLocations = pickupRecentLocations,
-        dropoffRecentLocations = dropoffRecentLocations,
-        isLoadingRecentLocations = isLoadingRecentLocations,
-        isLoadingAirports = isLoadingAirports,
-        onPickupRecentLocationSelected = onPickupRecentLocationSelected,
-        onDestinationRecentLocationSelected = onDestinationRecentLocationSelected,
-        showInvalidLocationDialog = showInvalidLocationDialog,
-        invalidLocationMessage = invalidLocationMessage,
-        onDismissError = { showInvalidLocationDialog = false },
-        onHoursSelected = { selectedHours = it },
-        onPickupMapClick = events.onPickupMapClick,
-        onDestinationMapClick = events.onDestinationMapClick
-    )
-}
-
-// ==========================================
-// UI Content Composable
-// ==========================================
-
-@Composable
-fun ScheduleRideScreenContent(
-    state: ScheduleRideState,
-    events: ScheduleRideEvents,
-    pickupText: String,
-    destinationText: String,
-    pickupSearchValue: String,
-    destinationSearchValue: String,
-    bothLocationsFilled: Boolean,
-    hasValidCoordinates: Boolean,
-    pickupRecentLocations: List<RecentLocation>,
-    dropoffRecentLocations: List<RecentLocation>,
-    isLoadingRecentLocations: Boolean,
-    isLoadingAirports: Boolean,
-    onPickupRecentLocationSelected: (RecentLocation) -> Unit,
-    onDestinationRecentLocationSelected: (RecentLocation) -> Unit,
-    showInvalidLocationDialog: Boolean,
-    invalidLocationMessage: String,
-    onDismissError: () -> Unit,
-    onHoursSelected: (String) -> Unit,
-    onPickupMapClick: () -> Unit,
-    onDestinationMapClick: () -> Unit
-) {
+    // --- UI LAYOUT ---
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -572,185 +402,310 @@ fun ScheduleRideScreenContent(
                 .imePadding(),
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
-            item { ScheduleRideHeader(events.onDismiss) }
+            item { ScheduleRideHeader(onDismiss) }
 
+            // FIXED: Using named arguments
             item {
                 RideTypeSelection(
-                    selectedRideType = state.selectedRideType,
-                    onRideTypeSelected = events.onRideTypeSelected
+                    selectedRideType = selectedRideType,
+                    onRideTypeSelected = { selectedRideType = it }
                 )
             }
 
-            if (state.selectedRideType == RideType.HOURLY) {
+            if (selectedRideType == RideType.HOURLY) {
                 item {
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(Modifier.height(16.dp))
+                    // FIXED: Using named arguments
                     HoursDropdown(
-                        selectedHours = state.selectedHours,
-                        onHoursSelected = onHoursSelected,
+                        selectedHours = selectedHours,
+                        onHoursSelected = { selectedHours = it },
                         modifier = Modifier.padding(horizontal = 0.dp)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(Modifier.height(8.dp))
                 }
             }
 
+            // FIXED: Using named arguments
             item {
                 BookingTypeSelection(
-                    selectedBookingType = state.selectedBookingType,
-                    selectedDestinationType = state.selectedDestinationType,
-                    onBookingTypeSelected = events.onBookingTypeSelected,
-                    onDestinationTypeSelected = events.onDestinationTypeSelected
+                    selectedBookingType = selectedBookingType,
+                    selectedDestinationType = selectedDestinationType,
+                    onBookingTypeSelected = { selectedBookingType = it },
+                    onDestinationTypeSelected = { selectedDestinationType = it }
                 )
             }
 
+            // --- INPUT CARD + BUTTON ---
             item {
-                LocationInputCard(
-                    pickupValue = pickupSearchValue,
-                    destinationValue = destinationSearchValue,
-                    onPickupValueChange = events.onPickupValueChange,
-                    onDestinationValueChange = events.onDestinationValueChange,
-                    onPickupFocusChanged = events.onPickupFocusChanged,
-                    onDestinationFocusChanged = events.onDestinationFocusChanged,
-                    showPickupClear = pickupText.isNotEmpty(),
-                    showDestinationClear = destinationText.isNotEmpty(),
-                    onPickupClear = events.onPickupClear,
-                    onDestinationClear = events.onDestinationClear,
-                    onPickupMapClick = onPickupMapClick,
-                    onDestinationMapClick = onDestinationMapClick
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-            }
-
-            if (state.focusedField == "pickup" || state.focusedField == "destination") {
-                item {
-                    AnimatedVisibility(
-                        visible = state.focusedField == "pickup" || state.focusedField == "destination",
-                        enter = fadeIn(animationSpec = tween(durationMillis = 300)) + expandVertically(animationSpec = tween(durationMillis = 300)),
-                        exit = fadeOut(animationSpec = tween(durationMillis = 300)) + shrinkVertically(animationSpec = tween(durationMillis = 300))
-                    ) {
-                        MapSelectionRow(
-                            onPickupMapClick = onPickupMapClick,
-                            onDestinationMapClick = onDestinationMapClick,
-                            showPickupMapButton = state.focusedField == "pickup",
-                            showDestinationMapButton = state.focusedField == "destination"
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        LocationInputCard(
+                            pickupValue = pickupLocation,
+                            destinationValue = destinationLocation,
+                            onPickupValueChange = {
+                                pickupLocation = it
+                                // Reset auto-navigation guard when pickup input changes
+                                if (hasAutoNavigated) {
+                                    viewModel.resetAutoNavigationGuard()
+                                }
+                                if (selectedBookingType == BookingType.AIRPORT) {
+                                    searchJob?.cancel()
+                                    searchJob = coroutineScope.launch {
+                                        delay(300) // Debounce airport search
+                                        if (it.length >= 2) {
+                                            showPickupSuggestions = true
+                                            airportService.searchAirports(it)
+                                        } else if (it.isEmpty()) {
+                                            showPickupSuggestions = false
+                                            airportService.clearSuggestions()
+                                        }
+                                    }
+                                } else {
+                                    searchJob?.cancel()
+                                    searchJob = coroutineScope.launch {
+                                        delay(300)
+                                        if (it.length >= 2) {
+                                            pickupPredictions = placesService.getPlacePredictions(it)
+                                            showPickupSuggestions = true
+                                        }
+                                    }
+                                }
+                            },
+                            onDestinationValueChange = {
+                                destinationLocation = it
+                                // Reset auto-navigation guard when destination input changes
+                                if (hasAutoNavigated) {
+                                    viewModel.resetAutoNavigationGuard()
+                                }
+                                if (selectedDestinationType == BookingType.AIRPORT) {
+                                    searchJob?.cancel()
+                                    searchJob = coroutineScope.launch {
+                                        delay(300) // Debounce airport search
+                                        if (it.length >= 2) {
+                                            showDestinationSuggestions = true
+                                            airportService.searchAirports(it)
+                                        } else if (it.isEmpty()) {
+                                            showDestinationSuggestions = false
+                                            airportService.clearSuggestions()
+                                        }
+                                    }
+                                } else {
+                                    searchJob?.cancel()
+                                    searchJob = coroutineScope.launch {
+                                        delay(300)
+                                        if (it.length >= 2) {
+                                            destinationPredictions = placesService.getPlacePredictions(it)
+                                            showDestinationSuggestions = true
+                                        }
+                                    }
+                                }
+                            },
+                            onPickupFocusChanged = { if(it) { focusedField = "pickup"; showDestinationSuggestions = false } },
+                            onDestinationFocusChanged = { if(it) { focusedField = "destination"; showPickupSuggestions = false } },
+                            showPickupClear = pickupLocation.isNotEmpty(),
+                            showDestinationClear = destinationLocation.isNotEmpty(),
+                            onPickupClear = { 
+                                pickupLocation = ""
+                                pickupLat = 0.0
+                                pickupLong = 0.0
+                                pickupCountryCode = null
+                                pickupPostalCode = null
+                                pickupCoordinate = null
+                                // Reset auto-navigation guard when pickup is cleared
+                                if (hasAutoNavigated) {
+                                    viewModel.resetAutoNavigationGuard()
+                                }
+                            },
+                            onDestinationClear = { 
+                                destinationLocation = ""
+                                destLat = 0.0
+                                destLong = 0.0
+                                destCountryCode = null
+                                destPostalCode = null
+                                destinationCoordinate = null
+                                // Reset auto-navigation guard when destination is cleared
+                                if (hasAutoNavigated) {
+                                    viewModel.resetAutoNavigationGuard()
+                                }
+                            },
+                            onPickupMapClick = { coroutineScope.launch { navigateToMap(true) } },
+                            onDestinationMapClick = { coroutineScope.launch { navigateToMap(false) } }
                         )
+
+                        // --- CONTINUE BUTTON (Stable, Right Aligned) ---
+                        val bothLocationsFilled = (pickupLocation.isNotEmpty() || selectedPickupAirport.isNotEmpty()) &&
+                                                 (destinationLocation.isNotEmpty() || selectedDestinationAirport.isNotEmpty())
+                        val noSuggestionsShowing = !showPickupSuggestions && !showDestinationSuggestions
+
+                        // Capture current coordinate values to avoid smart cast issues with delegated properties
+                        val currentPickupCoord = pickupCoordinate
+                        val currentDestCoord = destinationCoordinate
+
+                        val hasValidCoordinates = currentPickupCoord != null && currentDestCoord != null &&
+                                                 currentPickupCoord.latitude != 0.0 && currentPickupCoord.longitude != 0.0 &&
+                                                 currentDestCoord.latitude != 0.0 && currentDestCoord.longitude != 0.0
+
+                        // Check if locations are the same (within ~11 meters)
+                        val locationsAreSame = if (currentPickupCoord != null && currentDestCoord != null) {
+                            val latDiff = kotlin.math.abs(currentPickupCoord.latitude - currentDestCoord.latitude)
+                            val longDiff = kotlin.math.abs(currentPickupCoord.longitude - currentDestCoord.longitude)
+                            latDiff < 0.0001 && longDiff < 0.0001
+                        } else false
+
+                        // Log button visibility state for debugging
+                        val shouldShowButton = bothLocationsFilled && noSuggestionsShowing && hasValidCoordinates && !locationsAreSame
+                        LaunchedEffect(shouldShowButton, bothLocationsFilled, noSuggestionsShowing, hasValidCoordinates, locationsAreSame) {
+                            Log.d("ScheduleRide", "🔘 Next button visibility check:")
+                            Log.d("ScheduleRide", "🔘   bothLocationsFilled: $bothLocationsFilled")
+                            Log.d("ScheduleRide", "🔘   noSuggestionsShowing: $noSuggestionsShowing")
+                            Log.d("ScheduleRide", "🔘   hasValidCoordinates: $hasValidCoordinates")
+                            Log.d("ScheduleRide", "🔘   locationsAreSame: $locationsAreSame")
+                            Log.d("ScheduleRide", "🔘   shouldShowButton: $shouldShowButton")
+                            if (hasValidCoordinates) {
+                                Log.d("ScheduleRide", "🔘   Pickup coord: Lat=${currentPickupCoord?.latitude}, Long=${currentPickupCoord?.longitude}")
+                                Log.d("ScheduleRide", "🔘   Dest coord: Lat=${currentDestCoord?.latitude}, Long=${currentDestCoord?.longitude}")
+                            }
+                        }
+
+                        AnimatedVisibility(
+                            visible = shouldShowButton,
+                            enter = fadeIn(animationSpec = tween(durationMillis = 200)),
+                            exit = fadeOut(animationSpec = tween(durationMillis = 200))
+                        ) {
+                            Column {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    Surface(
+                                        onClick = {
+                                            coroutineScope.launch {
+                                                executeValidationAndNext(
+                                                    pickupCoordinate,
+                                                    destinationCoordinate,
+                                                    pickupLocation,
+                                                    destinationLocation
+                                                )
+                                            }
+                                        },
+                                        shape = CircleShape,
+                                        color = LimoOrange,
+                                        shadowElevation = 4.dp,
+                                        modifier = Modifier.size(48.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            if (isValidating) {
+                                                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                            } else {
+                                                Icon(Icons.Default.ArrowForward, "Continue", tint = Color.White, modifier = Modifier.size(24.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
             }
 
             if (showInvalidLocationDialog && invalidLocationMessage.isNotEmpty()) {
-                item {
-                    LocationErrorBanner(message = invalidLocationMessage, onDismiss = onDismissError)
-                }
+                item { UberStyleErrorBanner(invalidLocationMessage) { showInvalidLocationDialog = false } }
             }
 
-            val shouldShowPickupRecent = state.focusedField == "pickup" &&
-                    !state.showPickupSuggestions &&
-                    (pickupText.isEmpty() || pickupText.length <= 2) &&
-                    state.selectedBookingType != BookingType.AIRPORT
-
-            if (shouldShowPickupRecent) {
-                if (isLoadingRecentLocations) {
-                    items(3) { UberShimmerItem() }
-                } else if (pickupRecentLocations.isNotEmpty()) {
-                    items(pickupRecentLocations) { location ->
-                        UberRecentLocationItem(
-                            location = location,
-                            onClick = { onPickupRecentLocationSelected(location) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
+            if (focusedField == "pickup" && selectedBookingType != BookingType.AIRPORT) {
+                item { SetOnMapItem { coroutineScope.launch { navigateToMap(true) } } }
+            } else if (focusedField == "destination" && selectedDestinationType != BookingType.AIRPORT) {
+                item { SetOnMapItem { coroutineScope.launch { navigateToMap(false) } } }
             }
 
-            if (state.showPickupSuggestions && state.selectedBookingType != BookingType.AIRPORT && state.pickupPredictions.isNotEmpty()) {
-                itemsIndexed(state.pickupPredictions) { _, prediction ->
-                    AddressSuggestionItem(
-                        prediction = prediction,
-                        onClick = { events.onPickupSuggestionSelected(prediction) }
-                    )
-                }
-            }
-
-            if (state.showPickupSuggestions && state.selectedBookingType == BookingType.AIRPORT) {
-                if (isLoadingAirports) {
-                    items(3) { UberShimmerItem() }
-                } else if (state.airportSuggestions.isNotEmpty()) {
-                    itemsIndexed(state.airportSuggestions) { _, airportName ->
-                        AirportSuggestionItem(
-                            airportName = airportName,
-                            onClick = { events.onPickupAirportSelected(airportName) }
-                        )
-                    }
-                }
-            }
-
-            val shouldShowDropoffRecent = state.focusedField == "destination" &&
-                    !state.showDestinationSuggestions &&
-                    (destinationText.isEmpty() || destinationText.length <= 2) &&
-                    state.selectedDestinationType != BookingType.AIRPORT
-
-            if (shouldShowDropoffRecent) {
-                if (isLoadingRecentLocations) {
-                    items(3) { UberShimmerItem() }
-                } else if (dropoffRecentLocations.isNotEmpty()) {
-                    items(dropoffRecentLocations) { location ->
-                        UberRecentLocationItem(
-                            location = location,
-                            onClick = { onDestinationRecentLocationSelected(location) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            }
-
-            if (state.showDestinationSuggestions && state.selectedDestinationType != BookingType.AIRPORT && state.destinationPredictions.isNotEmpty()) {
-                itemsIndexed(state.destinationPredictions) { _, prediction ->
-                    AddressSuggestionItem(
-                        prediction = prediction,
-                        onClick = { events.onDestinationSuggestionSelected(prediction) }
-                    )
-                }
-            }
-
-            if (state.showDestinationSuggestions && state.selectedDestinationType == BookingType.AIRPORT) {
-                if (isLoadingAirports) {
-                    items(3) { UberShimmerItem() }
-                } else if (state.airportSuggestions.isNotEmpty()) {
-                    itemsIndexed(state.airportSuggestions) { _, airportName ->
-                        AirportSuggestionItem(
-                            airportName = airportName,
-                            onClick = { events.onDestinationAirportSelected(airportName) }
-                        )
-                    }
-                }
-            }
-
-            if (bothLocationsFilled && hasValidCoordinates && !state.showPickupSuggestions && !state.showDestinationSuggestions) {
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 16.dp, bottom = 40.dp),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        Button(
-                            onClick = events.onNext,
-                            colors = ButtonDefaults.buttonColors(containerColor = LimoOrange, contentColor = Color.White),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(44.dp)
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Next", style = AppTextStyles.buttonLarge)
-                                Icon(
-                                    painter = painterResource(id = R.drawable.right_arrow),
-                                    contentDescription = "Arrow",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(AppDimensions.iconSize)
-                                )
+            // --- LIST SUGGESTIONS ---
+            if (focusedField == "pickup") {
+                if (showPickupSuggestions) {
+                    if (selectedBookingType == BookingType.AIRPORT) {
+                        itemsIndexed(airportSuggestions) { _, name ->
+                            RideAirportItem(name) { 
+                                selectedPickupAirport = name
+                                handleLocationSelection(
+                                    true, 
+                                    name, 
+                                    airportService.selectAirportSuggestion(name)?.let { LocationCoordinate(it.lat?:0.0, it.long?:0.0) },
+                                    listOf("AIRPORT") // Known airport
+                                ) 
                             }
+                        }
+                    } else {
+                        itemsIndexed(pickupPredictions) { _, pred ->
+                            RideAddressItem(pred) {
+                                coroutineScope.launch {
+                                    val details = placesService.getPlaceDetails(pred.placeId)
+                                    val coord = details?.let { LocationCoordinate(it.latitude?:0.0, it.longitude?:0.0, it.country, it.postalCode) }
+                                    // Pass place types for airport detection
+                                    handleLocationSelection(true, details?.address ?: pred.primaryText, coord, details?.types)
+                                }
+                            }
+                        }
+                    }
+                } else if (pickupLocation.isEmpty()) {
+                    if (isLoadingRecent) items(3) { UberShimmerItem() }
+                    else items(pickupRecentLocations) { loc ->
+                        UberRecentLocationItem(loc) { 
+                            // If it's a known airport from recent locations, auto-set booking type
+                            if (loc.isAirport) {
+                                selectedBookingType = BookingType.AIRPORT
+                                selectedPickupAirport = loc.airportName ?: loc.address
+                            }
+                            handleLocationSelection(
+                                true, 
+                                if(loc.isAirport) loc.airportName?:loc.address else loc.address, 
+                                loc.toLocationCoordinate(),
+                                // Pass airport type if known
+                                if (loc.isAirport) listOf("AIRPORT") else null
+                            ) 
+                        }
+                    }
+                }
+            }
+            else if (focusedField == "destination") {
+                if (showDestinationSuggestions) {
+                    if (selectedDestinationType == BookingType.AIRPORT) {
+                        itemsIndexed(airportSuggestions) { _, name ->
+                            RideAirportItem(name) { 
+                                selectedDestinationAirport = name
+                                handleLocationSelection(
+                                    false, 
+                                    name, 
+                                    airportService.selectAirportSuggestion(name)?.let { LocationCoordinate(it.lat?:0.0, it.long?:0.0) },
+                                    listOf("AIRPORT") // Known airport
+                                ) 
+                            }
+                        }
+                    } else {
+                        itemsIndexed(destinationPredictions) { _, pred ->
+                            RideAddressItem(pred) {
+                                coroutineScope.launch {
+                                    val details = placesService.getPlaceDetails(pred.placeId)
+                                    val coord = details?.let { LocationCoordinate(it.latitude?:0.0, it.longitude?:0.0, it.country, it.postalCode) }
+                                    // Pass place types for airport detection
+                                    handleLocationSelection(false, details?.address ?: pred.primaryText, coord, details?.types)
+                                }
+                            }
+                        }
+                    }
+                } else if (destinationLocation.isEmpty()) {
+                    if (isLoadingRecent) items(3) { UberShimmerItem() }
+                    else items(dropoffRecentLocations) { loc ->
+                        UberRecentLocationItem(loc) { 
+                            // If it's a known airport from recent locations, auto-set booking type
+                            if (loc.isAirport) {
+                                selectedDestinationType = BookingType.AIRPORT
+                                selectedDestinationAirport = loc.airportName ?: loc.address
+                            }
+                            handleLocationSelection(
+                                false, 
+                                if(loc.isAirport) loc.airportName?:loc.address else loc.address, 
+                                loc.toLocationCoordinate(),
+                                // Pass airport type if known
+                                if (loc.isAirport) listOf("AIRPORT") else null
+                            ) 
                         }
                     }
                 }
@@ -760,294 +715,123 @@ fun ScheduleRideScreenContent(
 }
 
 // ==========================================
-// UI Components
+// Components & Helpers
 // ==========================================
 
 @Composable
-fun MapSelectionRow(
-    onPickupMapClick: () -> Unit,
-    onDestinationMapClick: () -> Unit,
-    showPickupMapButton: Boolean,
-    showDestinationMapButton: Boolean
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp, horizontal = 0.dp),
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.CenterVertically
+fun UberStyleErrorBanner(message: String, onDismiss: () -> Unit) {
+    Surface(
+        onClick = onDismiss,
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFFFEF2F2),
+        border = BorderStroke(1.dp, Color(0xFFA6342E)),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
     ) {
-        if (showPickupMapButton) {
-            OutlinedButton(
-                onClick = onPickupMapClick,
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, LimoOrange),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = LimoOrange)
-            ) {
-                Icon(painterResource(id = R.drawable.ic_location_pin), contentDescription = "Select Pickup on Map", modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Select Pickup on Map")
-            }
-        }
-
-        if (showDestinationMapButton) {
-            OutlinedButton(
-                onClick = onDestinationMapClick,
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, LimoOrange),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = LimoOrange)
-            ) {
-                Icon(painterResource(id = R.drawable.ic_location_pin), contentDescription = "Select Destination on Map", modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Select Destination on Map")
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Info, "Error", tint = Color(0xFFA6342E), modifier = Modifier.size(24.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text("Location Error", style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFA6342E)))
+                Text(message, style = TextStyle(fontSize = 13.sp, color = Color(0xFFA6342E)))
             }
         }
     }
 }
 
 @Composable
-fun UberRecentLocationItem(
-    location: RecentLocation,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun SetOnMapItem(onClick: () -> Unit) {
     Row(
-        modifier = modifier
-            .clickable(onClick = onClick)
-            .padding(vertical = 24.dp, horizontal = 8.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .background(Color(0xFFEEEEEE), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Schedule,
-                contentDescription = "Recent",
-                tint = Color.Black,
-                modifier = Modifier.size(18.dp)
-            )
+        Box(Modifier.size(36.dp).background(LimoOrange.copy(0.1f), CircleShape), contentAlignment = Alignment.Center) {
+            Icon(painterResource(R.drawable.ic_location_pin), null, tint = LimoOrange, modifier = Modifier.size(18.dp))
         }
+        Spacer(Modifier.width(16.dp))
+        Text("Set location on map", style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium, color = LimoBlack))
+    }
+    Divider(color = LimoBlack.copy(0.05f), thickness = 1.dp)
+}
 
-        Spacer(modifier = Modifier.width(16.dp))
-
-        Column(verticalArrangement = Arrangement.Center) {
-            val title = if (location.isAirport) {
-                location.airportName ?: location.address
-            } else {
-                location.address.substringBefore(",")
-            }
-
-            Text(
-                text = title,
-                style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-                color = Color.Black,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = location.address,
-                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Normal),
-                color = Color.Gray,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+@Composable
+fun UberRecentLocationItem(location: RecentLocation, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 16.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(36.dp).background(Color(0xFFEEEEEE), CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Schedule, null, tint = Color.Black, modifier = Modifier.size(18.dp))
         }
+        Spacer(Modifier.width(16.dp))
+        Column {
+            Text(if (location.isAirport) location.airportName ?: location.address else location.address.substringBefore(","), style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold))
+            Text(location.address, style = TextStyle(fontSize = 14.sp, color = Color.Gray), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+fun RideAddressItem(prediction: PlacePrediction, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 16.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(36.dp).background(Color(0xFFEEEEEE), CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.LocationOn, null, tint = Color.Black, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Column {
+            Text(prediction.primaryText, style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium))
+            Text(prediction.fullText ?: prediction.secondaryText ?: "", style = TextStyle(fontSize = 14.sp, color = Color.Gray), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+fun RideAirportItem(airportName: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 16.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(36.dp).background(Color(0xFFEEEEEE), CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Flight, null, tint = Color.Black, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Text(airportName, style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium))
     }
 }
 
 @Composable
 fun UberShimmerItem() {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp, horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .lighterShimmer()
-        )
-
-        Spacer(modifier = Modifier.width(16.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Box(
-                modifier = Modifier
-                    .width(150.dp)
-                    .height(14.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .lighterShimmer()
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.8f)
-                    .height(12.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .lighterShimmer()
-            )
+    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(32.dp).clip(CircleShape).background(Color.LightGray.copy(0.3f)))
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Box(Modifier.width(100.dp).height(14.dp).background(Color.LightGray.copy(0.3f)))
+            Spacer(Modifier.height(6.dp))
+            Box(Modifier.fillMaxWidth(0.8f).height(12.dp).background(Color.LightGray.copy(0.3f)))
         }
     }
 }
 
-@Composable
-fun Modifier.lighterShimmer(): Modifier {
-    val transition = rememberInfiniteTransition(label = "shimmer")
-    val translateAnim by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1000f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "shimmer"
-    )
-
-    val brush = Brush.linearGradient(
-        colors = listOf(Color(0xFFF5F5F5), Color(0xFFFFFFFF), Color(0xFFF5F5F5)),
-        start = Offset.Zero,
-        end = Offset(x = translateAnim, y = translateAnim)
-    )
-
-    return this.background(brush)
+private fun calculateDistance(c1: LocationCoordinate, c2: LocationCoordinate): Double {
+    val R = 6371.0; val dLat = Math.toRadians(c2.latitude - c1.latitude); val dLon = Math.toRadians(c2.longitude - c1.longitude)
+    val a = sin(dLat / 2) * sin(dLat / 2) + cos(Math.toRadians(c1.latitude)) * cos(Math.toRadians(c2.latitude)) * sin(dLon / 2) * sin(dLon / 2)
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a))
 }
 
-// ==========================================
-// Business Logic Helpers (Private)
-// ==========================================
-
-private val countrySynonyms = mapOf(
-    "UNITED STATES OF AMERICA" to "US", "USA" to "US", "US" to "US",
-    "U.S" to "US", "U.S.A" to "US", "U.S.A." to "US", "UNITED STATES" to "US",
-    "AMERICA" to "US", "UNITED KINGDOM" to "GB", "UK" to "GB", "U.K" to "GB",
-    "U.K." to "GB", "GREAT BRITAIN" to "GB", "BRITAIN" to "GB", "ENGLAND" to "GB",
-    "SCOTLAND" to "GB", "WALES" to "GB", "NORTHERN IRELAND" to "GB",
-    "UNITED ARAB EMIRATES" to "AE", "UAE" to "AE", "U.A.E" to "AE",
-    "U.A.E." to "AE", "EMIRATES" to "AE", "CANADA" to "CA", "CA" to "CA",
-    "C.A" to "CA", "C.A." to "CA", "MEXICO" to "MX", "AUSTRALIA" to "AU",
-    "NEW ZEALAND" to "NZ", "GERMANY" to "DE", "FRANCE" to "FR", "SPAIN" to "ES",
-    "ITALY" to "IT", "INDIA" to "IN", "CHINA" to "CN", "JAPAN" to "JP", "SINGAPORE" to "SG"
-)
-
-private fun normalizeCountry(country: String?): String? {
-    if (country.isNullOrBlank()) return null
-    var normalized = country.trim().replace(".", "").replace(",", "").replace(";", "").replace("  ", " ").uppercase()
-    countrySynonyms[normalized]?.let { return it }
-    val locale = Locale.getDefault()
-    for (code in Locale.getISOCountries()) {
-        val countryName = locale.getDisplayCountry(Locale("", code))
-        if (countryName.uppercase() == normalized || code.uppercase() == normalized) return code.uppercase()
-    }
-    if (normalized.length <= 3) return null
+suspend fun getLocationValidationError(context: Context, pickup: LocationCoordinate?, dropoff: LocationCoordinate?): String? {
+    if (pickup == null) return "Please select a valid pickup location."
+    if (dropoff == null) return "Please select a valid destination."
+    if (calculateDistance(pickup, dropoff) < 0.05) return "Pickup and drop locations are same"
+    val geo = Geocoder(context, Locale.getDefault())
+    try {
+        @Suppress("DEPRECATION")
+        val pC = geo.getFromLocation(pickup.latitude, pickup.longitude, 1)?.firstOrNull()?.countryCode
+        @Suppress("DEPRECATION")
+        val dC = geo.getFromLocation(dropoff.latitude, dropoff.longitude, 1)?.firstOrNull()?.countryCode
+        if (pC != null && dC != null && !pC.equals(dC, true)) return "International rides not supported ($pC vs $dC)."
+    } catch (e: Exception) { Log.e("Val", "Geo fail", e) }
+    if (calculateDistance(pickup, dropoff) > 1000.0) return "Distance too far."
     return null
-}
-
-private suspend fun extractCountryFromAddress(address: String, placesService: PlacesService): String? {
-    val details = placesService.getPlaceDetails(address)
-    return details?.country
-}
-
-private fun areLocationsSame(
-    pickupText: String,
-    destinationText: String,
-    pickupCoordinate: LocationCoordinate?,
-    destinationCoordinate: LocationCoordinate?
-): Boolean {
-    val normalizedPickup = pickupText.trim().replace("\\s+".toRegex(), " ").replace("[,;]".toRegex(), " ").uppercase()
-    val normalizedDestination = destinationText.trim().replace("\\s+".toRegex(), " ").replace("[,;]".toRegex(), " ").uppercase()
-
-    if (normalizedPickup.isNotEmpty() && normalizedDestination.isNotEmpty() && normalizedPickup == normalizedDestination) return true
-
-    if (pickupCoordinate != null && destinationCoordinate != null) {
-        val latDiff = abs(pickupCoordinate.latitude - destinationCoordinate.latitude)
-        val longDiff = abs(pickupCoordinate.longitude - destinationCoordinate.longitude)
-        if (latDiff < 0.002 && longDiff < 0.002) return true
-    }
-    return false
-}
-
-private suspend fun areCountriesDifferent(
-    pickupLocation: String, destinationLocation: String,
-    selectedPickupAirport: String, selectedDestinationAirport: String,
-    selectedBookingType: BookingType, selectedDestinationType: BookingType,
-    placesService: PlacesService
-): Boolean {
-    val pickupAddress = if (selectedBookingType == BookingType.AIRPORT) selectedPickupAirport else pickupLocation
-    val destinationAddress = if (selectedDestinationType == BookingType.AIRPORT) selectedDestinationAirport else destinationLocation
-    val pickupCountry = extractCountryFromAddress(pickupAddress, placesService)
-    val destinationCountry = extractCountryFromAddress(destinationAddress, placesService)
-    val normalizedPickup = normalizeCountry(pickupCountry)
-    val normalizedDestination = normalizeCountry(destinationCountry)
-
-    if (normalizedPickup != null && normalizedDestination != null) return normalizedPickup != normalizedDestination
-    return false
-}
-
-suspend fun getLocationValidationError(
-    pickupLocation: String, destinationLocation: String,
-    selectedPickupAirport: String, selectedDestinationAirport: String,
-    pickupCoordinate: LocationCoordinate?, destinationCoordinate: LocationCoordinate?,
-    selectedBookingType: BookingType, selectedDestinationType: BookingType,
-    placesService: PlacesService
-): String? {
-    val pickupText = if (selectedBookingType == BookingType.AIRPORT) selectedPickupAirport else pickupLocation
-    val destinationText = if (selectedDestinationType == BookingType.AIRPORT) selectedDestinationAirport else destinationLocation
-
-    if (areLocationsSame(pickupText, destinationText, pickupCoordinate, destinationCoordinate)) {
-        return "Pickup and destination locations cannot be the same. Please select different locations."
-    }
-    if (areCountriesDifferent(
-            pickupLocation, destinationLocation, selectedPickupAirport, selectedDestinationAirport,
-            selectedBookingType, selectedDestinationType, placesService
-        )
-    ) {
-        return "Pickup and destination must be in the same country. Please select valid locations."
-    }
-    return null
-}
-
-private fun createAndNavigateToTimeSelection(
-    rideType: RideType, bookingType: BookingType, destinationType: BookingType,
-    pickupLocation: String, destinationLocation: String,
-    selectedPickupAirport: String, selectedDestinationAirport: String,
-    pickupCoordinate: LocationCoordinate?, destinationCoordinate: LocationCoordinate?,
-    selectedHours: String, onNavigate: (RideData) -> Unit
-) {
-    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-    val now = Date()
-    val hoursString = selectedHours.replace(" hours minimum", "").replace(" hours", "").trim()
-
-    val rideData = RideData(
-        serviceType = rideType.toServiceType(),
-        bookingHour = hoursString,
-        pickupType = bookingType.toPickupType(),
-        dropoffType = destinationType.toPickupType(),
-        pickupDate = dateFormat.format(now),
-        pickupTime = timeFormat.format(now),
-        pickupLocation = pickupLocation.ifEmpty { selectedPickupAirport },
-        destinationLocation = destinationLocation.ifEmpty { selectedDestinationAirport },
-        selectedPickupAirport = selectedPickupAirport,
-        selectedDestinationAirport = selectedDestinationAirport,
-        noOfPassenger = 1,
-        noOfLuggage = 1,
-        noOfVehicles = 1,
-        pickupLat = pickupCoordinate?.latitude,
-        pickupLong = pickupCoordinate?.longitude,
-        pickupCountryCode = pickupCoordinate?.countryCode,
-        pickupPostalCode = pickupCoordinate?.postalCode,
-        destinationLat = destinationCoordinate?.latitude,
-        destinationLong = destinationCoordinate?.longitude,
-        destinationCountryCode = destinationCoordinate?.countryCode,
-        destinationPostalCode = destinationCoordinate?.postalCode
-    )
-    onNavigate(rideData)
 }

@@ -16,10 +16,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
@@ -49,10 +51,12 @@ fun PhoneEntryScreen(
 
     var showCountryPicker by remember { mutableStateOf(false) }
     val phone = remember { mutableStateOf(uiState?.phoneNumber ?: "") }
+    var isPhoneInputFocused by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .fillMaxWidth()
             .background(Color.White)
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(horizontal = AppDimensions.MainScreenPadding)
@@ -65,7 +69,7 @@ fun PhoneEntryScreen(
         )
         Text(
             text = "Enter your mobile number",
-            style = AppTextStyles.phoneEntryHeadline.copy(color = AppColors.LimoBlack)
+            style = AppTextStyles.phoneEntryHeadline.copy(color = AppColors.LimoBlack, fontSize = 25.sp)
         )
 
         Spacer(Modifier.height(AppSpacing.xl))
@@ -93,7 +97,7 @@ fun PhoneEntryScreen(
             Spacer(Modifier.width(AppSpacing.lg))
 
             OutlinedTextField(
-                value = phone.value,
+                value = if (isPhoneInputFocused) phone.value else uiState?.rawPhoneNumber ?: "",
                 onValueChange = { input ->
                     val cleaned = input.filter { it.isDigit() }.take(selectedCountry.phoneLength)
                     phone.value = cleaned
@@ -113,7 +117,7 @@ fun PhoneEntryScreen(
                 },
                 placeholder = {
                     Text(
-                        text = "9876543210",
+                        text = "1234567890",
                         style = AppTextStyles.phoneNumberInput.copy(
                             color = AppColors.LimoBlack.copy(alpha = 0.4f)
                         )
@@ -130,7 +134,10 @@ fun PhoneEntryScreen(
                 singleLine = true,
                 textStyle = AppTextStyles.phoneNumberInput.copy(color = AppColors.LimoBlack),
                 modifier = Modifier
-                    .weight(1f),
+                    .weight(1f)
+                    .onFocusChanged { focusState ->
+                        isPhoneInputFocused = focusState.isFocused
+                    },
 //                    .height(AppDimensions.phoneInputHeight),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -169,29 +176,21 @@ fun PhoneEntryScreen(
         // Next button
         Button(
             onClick = { if (uiState?.isLoading != true) onNext() },
-            colors = ButtonDefaults.buttonColors(containerColor = AppColors.LimoOrange),
+            enabled = uiState?.isLoading != true,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = AppColors.LimoOrange,
+                disabledContainerColor = AppColors.LimoOrange.copy(alpha = 0.6f)
+            ),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
                 .align(Alignment.End)
         ) {
-            if (uiState?.isLoading == true) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    color = AppColors.White,
-                    strokeWidth = 2.dp
-                )
-                Spacer(Modifier.width(1.dp))
-//                Text("Sending...", color = AppColors.White)
-            } else {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Continue", color = AppColors.White)
-                }
-            }
+            Text(
+                text = if (uiState?.isLoading == true) "Sending..." else "Continue",
+                color = AppColors.White
+            )
         }
         Spacer(Modifier.width(1.dp))
 
@@ -318,7 +317,7 @@ fun CountryPickerButton(
         ) {
             Text(text = country.flag, style = AppTextStyles.bodyLarge)
             Icon(
-                imageVector = Icons.Default.KeyboardArrowDown,
+                imageVector = Icons.Default.ArrowDropDown,
                 contentDescription = "Select Country",
                 tint = AppColors.LimoBlack.copy(alpha = 1f),
                 modifier = Modifier.size(20.dp)

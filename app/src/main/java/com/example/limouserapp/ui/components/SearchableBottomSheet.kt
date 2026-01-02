@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import com.example.limouserapp.ui.theme.LimoOrange
 import com.example.limouserapp.ui.theme.LimoWhite
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -45,16 +46,53 @@ fun <T> SearchableBottomSheet(
 ) {
     var searchText by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    var lastProcessedQuery by remember { mutableStateOf<String?>(null) }
+    var debounceJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     
     // Sheet state with medium and large detents (matches iOS)
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = false
     )
     
-    // Debounce search text
+    // Debounce search text with proper cancellation support
     LaunchedEffect(searchText) {
-        delay(300)
-        onSearchChanged?.invoke(searchText)
+        val currentQuery = searchText
+        
+        // Cancel previous debounce job if user continues typing
+        debounceJob?.cancel()
+        
+        // Only search if query is at least 2 characters
+        if (currentQuery.length < 2) {
+            // Clear results for short queries
+            if (currentQuery.isEmpty()) {
+                lastProcessedQuery = null
+            }
+            return@LaunchedEffect
+        }
+        
+        // Create new debounce job
+        debounceJob = scope.launch {
+            delay(500) // Debounce delay to reduce API calls
+            
+            // Only invoke if searchText hasn't changed during delay (still matches current query)
+            // and it's different from last processed query
+            if (searchText == currentQuery && searchText != lastProcessedQuery) {
+                lastProcessedQuery = searchText
+                onSearchChanged?.invoke(searchText)
+            }
+        }
+    }
+    
+    // Reset state when bottom sheet closes
+    LaunchedEffect(isVisible) {
+        if (!isVisible) {
+            // Cancel any pending debounce job
+            debounceJob?.cancel()
+            debounceJob = null
+            // Reset search text and last processed query
+            searchText = ""
+            lastProcessedQuery = null
+        }
     }
     
     // Show/hide bottom sheet based on isVisible

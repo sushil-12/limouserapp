@@ -2,307 +2,292 @@ package com.example.limouserapp.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.limouserapp.R
+import com.example.limouserapp.ui.components.ErrorAlertDialog
 import com.example.limouserapp.ui.state.OtpUiEvent
 import com.example.limouserapp.ui.state.OtpUiState
 import com.example.limouserapp.ui.theme.LimoOrange
 import com.example.limouserapp.ui.theme.GoogleSansFamily
 import com.example.limouserapp.ui.theme.AppDimensions
+import com.example.limouserapp.ui.viewmodel.OtpViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+private const val RESEND_INTERVAL_SECONDS = 30
 
 @Composable
 fun OtpScreen(
-    onNext: () -> Unit,
+    tempUserId: String,
+    phoneNumber: String,
+    onNext: (String) -> Unit,
     onBack: (() -> Unit)? = null,
-    uiState: OtpUiState? = null,
-    onEvent: (OtpUiEvent) -> Unit = {},
-    phoneNumber: String = "+1 9876543210"
+    viewModel: OtpViewModel = hiltViewModel()
 ) {
-    var otpDigits by remember { mutableStateOf(List(6) { "" }) }
-    val focusRequesters = remember { List(6) { FocusRequester() } }
+    val uiState by viewModel.uiState.collectAsState()
     val focusManager = LocalFocusManager.current
-    var localMessage by remember { mutableStateOf<String?>(null) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val scope = rememberCoroutineScope()
 
-    // Update ViewModel when OTP changes
-    LaunchedEffect(otpDigits) {
-        onEvent(OtpUiEvent.OtpChanged(otpDigits.joinToString("")))
+    // OTP
+    var otpValue by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    // Error dialog
+    var showErrorDialog by remember { mutableStateOf(false) }
+    var errorDialogTitle by remember { mutableStateOf("") }
+    var errorDialogMessage by remember { mutableStateOf("") }
+
+    // 🔹 RESEND TIMER STATE
+    var resendCooldown by remember { mutableIntStateOf(RESEND_INTERVAL_SECONDS) }
+    var canResend by remember { mutableStateOf(false) }
+
+    // 🔹 Start resend timer immediately on screen load
+    LaunchedEffect(Unit) {
+        resendCooldown = RESEND_INTERVAL_SECONDS
+        canResend = false
+        while (resendCooldown > 0) {
+            delay(1_000)
+            resendCooldown--
+        }
+        canResend = true
     }
 
-    val isOtpComplete = otpDigits.all { it.isNotEmpty() }
-    val isOtpValid = isOtpComplete && otpDigits.all { it.firstOrNull()?.isDigit() == true }
+    LaunchedEffect(tempUserId, phoneNumber) {
+        viewModel.setInitialData(tempUserId, phoneNumber)
+        delay(300)
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
 
-    fun verifyOtp(otp: String) {
-        if (otp.length == 6 && otp.all { it.isDigit() }) {
-            onEvent(OtpUiEvent.VerifyOtp)
-        } else {
-            localMessage = "Please enter a valid 6-digit code"
+    // Auto-navigate when OTP verification succeeds
+    LaunchedEffect(uiState.success, uiState.nextAction) {
+        if (uiState.success && uiState.nextAction != null) {
+            // Small delay to ensure UI updates are complete before navigation
+            delay(100)
+            onNext(uiState.nextAction!!)
         }
     }
 
-    LaunchedEffect(uiState?.success) {
-        if (uiState?.success == true) onNext()
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let { error ->
+            errorDialogTitle = "Error"
+            errorDialogMessage = error
+            showErrorDialog = true
+            otpValue = ""
+            focusRequester.requestFocus()
+        }
     }
 
-    LaunchedEffect(uiState?.error, uiState?.message) {
-        localMessage = uiState?.error ?: uiState?.message
+    // Auto-submit OTP when 6 digits are entered
+    LaunchedEffect(otpValue) {
+        if (otpValue.length == 6) {
+            // Clear focus and hide keyboard immediately for better UX
+            focusManager.clearFocus()
+            keyboardController?.hide()
+            
+            // Update OTP value and trigger verification
+            viewModel.onEvent(OtpUiEvent.OtpChanged(otpValue))
+            // Small delay to ensure state is updated before verification
+            delay(50)
+            viewModel.onEvent(OtpUiEvent.VerifyOtp)
+        }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color.White)
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .imePadding()
             .padding(horizontal = 24.dp)
     ) {
-        // Back button
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp)
-        ) {
-            IconButton(
-                onClick = { onBack?.invoke() },
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFF3F3F3))
-                    .align(Alignment.TopStart)
-            ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.backarrow),
-                    contentDescription = "Back",
-                    modifier = Modifier.size(12.dp),
-                    tint = Color.Unspecified
-                )
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-        val responsiveFontSize = when {
-            screenWidth < 360.dp -> 24.sp
-            screenWidth < 400.dp -> 26.sp
-            else -> 28.sp
-        }
+        Spacer(Modifier.height(50.dp))
 
         Text(
-            text = "Enter the verification code\nsent to you",
+            text = buildAnnotatedString {
+                append("Enter the 6-digit code sent via SMS at ")
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                    append(phoneNumber)
+                }
+                append(".")
+            },
             style = TextStyle(
                 fontFamily = GoogleSansFamily,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = responsiveFontSize,
-                lineHeight = (responsiveFontSize * 1.5f),
-                color = Color(0xFF121212)
-            ),
-            modifier = Modifier.fillMaxWidth()
+                fontWeight = FontWeight.Medium,
+                fontSize = 24.sp,
+                color = Color.Black,
+                lineHeight = 32.sp
+            )
         )
 
         Spacer(Modifier.height(12.dp))
 
         Text(
-            text = "We have sent you a 6-digit code on your $phoneNumber.",
+            text = "Change your mobile number?",
             style = TextStyle(
                 fontFamily = GoogleSansFamily,
-                fontWeight = FontWeight.Normal,
-                fontSize = 12.sp,
-                color = Color(0xFF121212)
-            )
+                fontSize = 16.sp,
+                color = Color.Black.copy(alpha = 0.6f),
+                textDecoration = TextDecoration.Underline
+            ),
+            modifier = Modifier.clickable {
+                otpValue = ""
+                // Clear stored data when changing phone number
+                viewModel.onEvent(OtpUiEvent.ClearError)
+                viewModel.onEvent(OtpUiEvent.ClearSuccess)
+                onBack?.invoke()
+            }
         )
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(40.dp))
 
-        // OTP input boxes
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            repeat(6) { index ->
-                OutlinedTextField(
-                    value = otpDigits[index],
-                    onValueChange = { newValue ->
-                        val char = newValue.takeLast(1)
-                        if (char.isEmpty()) {
-                            val temp = otpDigits.toMutableList()
-                            temp[index] = ""
-                            otpDigits = temp
-                            if (index > 0) focusRequesters[index - 1].requestFocus()
-                        } else if (char.all { it.isDigit() }) {
-                            val temp = otpDigits.toMutableList()
-                            temp[index] = char
-                            otpDigits = temp
-                            if (index < 5) focusRequesters[index + 1].requestFocus()
-                            else focusManager.clearFocus()
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .width(48.dp)
-                        .height(48.dp)
-                        .focusRequester(focusRequesters[index]),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    textStyle = TextStyle(
-                        fontFamily = GoogleSansFamily,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 16.sp,
-                        textAlign = TextAlign.Center,
-                        color = Color(0xFF121212)
-                    ),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = LimoOrange,
-                        unfocusedBorderColor = Color(0xFF121212).copy(alpha = 0.3f),
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        cursorColor = LimoOrange,
-                        errorBorderColor = Color(0xFF121212).copy(alpha = 0.3f) // override red
-                    )
-                )
-            }
-        }
-
-        LaunchedEffect(Unit) { focusRequesters[0].requestFocus() }
-
-        // Neutral message text
-        localMessage?.let { msg ->
-            Text(
-                text = msg,
-                color = Color(0xFF121212).copy(alpha = 0.6f),
-                style = TextStyle(
-                    fontFamily = GoogleSansFamily,
-                    fontWeight = FontWeight.Normal,
-                    fontSize = 14.sp
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp)
-            )
-        }
-
-        if (uiState?.isLoading == true) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    color = LimoOrange,
-                    strokeWidth = 2.dp
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "Verifying...",
-                    style = TextStyle(
-                        fontFamily = GoogleSansFamily,
-                        fontSize = 14.sp,
-                        color = Color(0xFF121212)
-                    )
-                )
-            }
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        // Bottom Buttons
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 24.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedButton(
-                onClick = { onEvent(OtpUiEvent.ResendOtp) },
-                shape = RoundedCornerShape(17.dp),
-                border = BorderStroke(0.dp, Color.Transparent),
-                modifier = Modifier
-                    .width(200.dp)
-                    .height(34.dp),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = Color(0xFFF3F3F3), // light gray background
-                    contentColor = Color(0xFF121212).copy(alpha = 0.5f) // soft gray text
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp) // tight capsule look
-            ) {
-                Text(
-                    text = "Resend code via SMS (0:09)", // timer text
-                    style = TextStyle(
-                        fontFamily = GoogleSansFamily,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 12.sp,
-                        lineHeight = 14.sp,
-                        color = Color(0xFF121212).copy(alpha = 0.5f)
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Clip,
-                    textAlign = TextAlign.Center
-                )
-            }
-
-
-            Button(
-                onClick = {
-                    val otpString = otpDigits.joinToString("")
-                    if (isOtpValid) verifyOtp(otpString)
-                    else localMessage = "Please enter all 6 digits"
+        // OTP Input
+        Box(Modifier.fillMaxWidth()) {
+            BasicTextField(
+                value = otpValue,
+                onValueChange = {
+                    if (it.length <= 6 && it.all(Char::isDigit)) {
+                        otpValue = it
+                    }
                 },
-                enabled = isOtpComplete,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isOtpValid)
-                        LimoOrange else LimoOrange.copy(alpha = 0.5f)
-                ),
-                shape = RoundedCornerShape(24.dp),
                 modifier = Modifier
-                    .width(94.dp)
-                    .height(48.dp)
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Next",
-                        style = TextStyle(
-                            fontFamily = GoogleSansFamily,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 16.sp,
-                            color = Color.White
-                        )
-                    )
-                    Icon(
-                        painter = painterResource(id = R.drawable.right_arrow),
-                        contentDescription = "Arrow",
-                        tint = Color.White,
-                        modifier = Modifier.size(AppDimensions.iconSize)
+                    .matchParentSize()
+                    .focusRequester(focusRequester),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                cursorBrush = SolidColor(Color.Transparent),
+                textStyle = TextStyle(color = Color.Transparent),
+                decorationBox = { it() }
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                repeat(6) { index ->
+                    val char = otpValue.getOrNull(index)?.toString() ?: ""
+                    OtpDigitVisual(
+                        char = char,
+                        isFocused = index == otpValue.length
                     )
                 }
             }
         }
+
+        Spacer(Modifier.height(32.dp))
+
+        val timerText = if (!canResend) {
+            "(0:${String.format("%02d", resendCooldown)})"
+        } else ""
+
+        // 🔹 RESEND BUTTON
+        Surface(
+            onClick = {
+                if (canResend) {
+                    viewModel.onEvent(OtpUiEvent.ResendOtp)
+
+                    resendCooldown = RESEND_INTERVAL_SECONDS
+                    canResend = false
+
+                    scope.launch {
+                        while (resendCooldown > 0) {
+                            delay(1_000)
+                            resendCooldown--
+                        }
+                        canResend = true
+                    }
+                }
+            },
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFFF3F4F6),
+            enabled = canResend
+        ) {
+            Text(
+                text = "Resend code via SMS $timerText",
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                style = TextStyle(
+                    fontSize = 16.sp,
+                    color = if (canResend) Color.Black else Color.Gray,
+                    fontWeight = FontWeight.Medium,
+                    fontFamily = GoogleSansFamily
+                )
+            )
+        }
+
+    }
+
+    ErrorAlertDialog(
+        isVisible = showErrorDialog,
+        onDismiss = { showErrorDialog = false },
+        title = errorDialogTitle,
+        message = errorDialogMessage
+    )
+}
+
+@Composable
+private fun OtpDigitVisual(char: String, isFocused: Boolean) {
+    val borderColor = if (isFocused) Color.Black else Color(0xFFE5E7EB)
+    val containerColor = if (isFocused) Color.White else Color(0xFFF9FAFB)
+
+    Box(
+        modifier = Modifier
+            .size(46.dp)
+            .background(containerColor, RoundedCornerShape(12.dp))
+            .border(
+                width = if (isFocused) 1.5.dp else 1.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(12.dp)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = char,
+            style = TextStyle(
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.Black,
+                fontFamily = GoogleSansFamily,
+                textAlign = TextAlign.Center
+            )
+        )
     }
 }
 
@@ -310,8 +295,9 @@ fun OtpScreen(
 @Composable
 fun OtpScreenPreview() {
     OtpScreen(
+        tempUserId = "test123",
+        phoneNumber = "+1 5551234567",
         onNext = {},
-        onBack = {},
-        phoneNumber = "+1 5551234567"
+        onBack = {}
     )
 }

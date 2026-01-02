@@ -38,7 +38,7 @@ class LocationRepository @Inject constructor(
                 )
                 Result.success(response)
             } catch (e: Exception) {
-                Result.failure(Exception(errorHandler.handleApiError(e)))
+                Result.failure(Exception(errorHandler.handleError(e)))
             }
         }
     }
@@ -57,7 +57,7 @@ class LocationRepository @Inject constructor(
                 )
                 Result.success(response)
             } catch (e: Exception) {
-                Result.failure(Exception(errorHandler.handleApiError(e)))
+                Result.failure(Exception(errorHandler.handleError(e)))
             }
         }
     }

@@ -19,6 +19,18 @@ import com.example.limouserapp.data.model.booking.BookingType
 import com.example.limouserapp.ui.theme.LimoBlack
 import com.example.limouserapp.ui.theme.GoogleSansFamily
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.toSize
+
 /**
  * Booking type dropdowns for pickup and destination
  */
@@ -77,56 +89,105 @@ private fun BookingTypeDropdown(
     onExpandedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // 1. Measure the trigger size to match the menu width exactly
+    var rowSize by remember { mutableStateOf(Size.Zero) }
+
+    // 2. Icon rotation state
+    val iconRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        label = "Arrow Rotation"
+    )
+
+    // Design Constants
     val borderColor = Color(0xFF252C3E)
-    
-    Box(modifier) {
-        OutlinedButton(
-            onClick = { onExpandedChange(!expanded) },
+    val menuBorderColor = Color(0xFFE0E0E0)
+    val containerShape = RoundedCornerShape(4.dp)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .wrapContentHeight()
+    ) {
+        // --- OUTER TRIGGER (Visual match to original, but responsive) ---
+        Surface(
+            shape = containerShape,
+            border = BorderStroke(1.dp, borderColor),
+            color = Color.White,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(38.dp),
-            shape = RoundedCornerShape(4.dp),
-            border = BorderStroke(1.dp, borderColor),
-            colors = ButtonDefaults.outlinedButtonColors(
-                containerColor = Color.White,
-                contentColor = borderColor
-            ),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                .onGloballyPositioned { layoutCoordinates ->
+                    rowSize = layoutCoordinates.size.toSize()
+                }
+                .clickable { onExpandedChange(!expanded) }
         ) {
             Row(
-                Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .padding(horizontal = 12.dp, vertical = 10.dp), // Dynamic height
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    selectedType.displayName,
+                    text = selectedType.displayName,
                     fontFamily = GoogleSansFamily,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    lineHeight = 22.sp,
                     color = borderColor,
-                    modifier = Modifier.weight(1f, fill = false)
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Icon(
                     painter = painterResource(id = R.drawable.dropdown_arrow),
-                    contentDescription = null,
-                    modifier = Modifier.size(8.dp),
-                    tint = borderColor
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = borderColor,
+                    modifier = Modifier
+                        .size(10.dp)
+                        .rotate(iconRotation)
                 )
             }
         }
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { onExpandedChange(false) }
+
+        // --- INNER DROPDOWN (Redesigned Style) ---
+        MaterialTheme(
+            shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(8.dp))
         ) {
-            BookingType.entries.forEach { type ->
-                DropdownMenuItem(
-                    text = { Text(type.displayName) },
-                    onClick = {
-                        onTypeSelected(type)
-                        onExpandedChange(false)
-                    }
-                )
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { onExpandedChange(false) },
+                offset = DpOffset(0.dp, 6.dp), // Floating effect
+                modifier = Modifier
+                    .width(with(LocalDensity.current) { rowSize.width.toDp() }) // Match Trigger width
+                    .background(Color.White)
+                    .border(BorderStroke(1.dp, menuBorderColor), RoundedCornerShape(8.dp))
+            ) {
+                BookingType.entries.forEach { type ->
+                    val isSelected = type == selectedType
+
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = type.displayName,
+                                fontFamily = GoogleSansFamily,
+                                fontSize = 14.sp,
+                                // Bold if selected, Medium otherwise
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) borderColor else Color.DarkGray
+                            )
+                        },
+                        onClick = {
+                            onTypeSelected(type)
+                            onExpandedChange(false)
+                        },
+                        colors = MenuDefaults.itemColors(
+                            textColor = borderColor,
+                            leadingIconColor = borderColor
+                        ),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                }
             }
         }
     }

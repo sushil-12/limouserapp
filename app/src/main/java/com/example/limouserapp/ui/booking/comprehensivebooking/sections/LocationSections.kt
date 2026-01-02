@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -44,7 +45,22 @@ fun PickupSection(
     onOriginCityChange: (String) -> Unit,
     onCruiseShipChange: (String) -> Unit,
     onShipArrivalChange: (String) -> Unit,
-    onCruisePortChange: (String) -> Unit
+    onShipArrivalClick: () -> Unit,
+    onCruisePortChange: (String) -> Unit,
+    // Error states
+    pickupLocationError: Boolean = false,
+    pickupCoordinatesError: Boolean = false,
+    pickupAddressValidationError: String? = null, // Address validation error message from Directions API
+    airportPickupError: Boolean = false,
+    cruisePickupError: Boolean = false,
+    cruisePickupPortError: Boolean = false,
+    cruisePickupShipError: Boolean = false,
+    pickupDateTimeError: Boolean = false,
+    // Specific airport field errors
+    pickupAirportError: Boolean = false,
+    pickupAirlineError: Boolean = false,
+    pickupFlightError: Boolean = false,
+    originCityError: Boolean = false
 ) {
     SectionHeader("Pick-up")
     
@@ -59,7 +75,8 @@ fun PickupSection(
                 value = formatDate(pickupDate),
                 onClick = onDateClick,
                 icon = Icons.Default.CalendarToday,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                isError = pickupDateTimeError
             )
 
             EditableField(
@@ -67,7 +84,8 @@ fun PickupSection(
                 value = formatTime(pickupTime),
                 onClick = onTimeClick,
                 icon = Icons.Default.AccessTime,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                isError = pickupDateTimeError
             )
         }
 
@@ -88,7 +106,8 @@ fun PickupSection(
                         value = pickupLocation,
                         onValueChange = onLocationChange,
                         onLocationSelected = onLocationSelected,
-                        placeholder = "Enter pickup address"
+                        placeholder = "Enter pickup address",
+                        error = pickupAddressValidationError ?: if (pickupLocationError) "Pickup location required" else if (pickupCoordinatesError) "Select location with coordinates" else null
                     )
                 }
             }
@@ -101,33 +120,39 @@ fun PickupSection(
                     EditableField(
                         label = "SELECT AIRPORT",
                         value = selectedPickupAirport?.displayName ?: "Search airports...",
-                        onClick = onAirportClick
+                        onClick = onAirportClick,
+                        isError = pickupAirportError,
+                        errorMessage = if (pickupAirportError) "Airport is required" else null
                     )
-                    
-                    // Airline selection (matches iOS)
+
+                    // Airline selection (matches iOS) - required for pickup airport
                     EditableField(
                         label = "SELECT AIRLINE",
                         value = selectedPickupAirline?.displayName ?: "Select Airline",
-                        onClick = onAirlineClick
+                        onClick = onAirlineClick,
+                        isError = pickupAirlineError,
+                        errorMessage = if (pickupAirlineError) "Airline is required" else null
                     )
                     
-                    // Flight number
+                    // Flight number - required for pickup airport
                     EditableTextField(
                         label = "FLIGHT / TAIL #",
                         value = pickupFlightNumber,
-                        onValueChange = onFlightNumberChange
+                        onValueChange = onFlightNumberChange,
+                        error = if (pickupFlightError) "Flight number is required" else null
                     )
-                    
+
                     // Origin Airport / City (matches iOS)
                     EditableTextField(
                         label = "ORIGIN AIRPORT / CITY",
                         value = originAirportCity,
-                        onValueChange = onOriginCityChange
+                        onValueChange = onOriginCityChange,
+                        error = if (originCityError) "Origin airport city is required" else null
                     )
                 }
             }
             // Cruise Port pickup - show address + cruise ship details (matches iOS)
-            selectedTransferType == "Cruise Port to City" || 
+            selectedTransferType == "Cruise Port to City" ||
             selectedTransferType == "Cruise Port to Airport" -> {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -142,23 +167,26 @@ fun PickupSection(
                             placeholder = "Enter pickup address"
                         )
                     }
-                    
+
                     EditableTextField(
                         label = "CRUISE PORT",
                         value = cruisePort,
-                        onValueChange = onCruisePortChange
+                        onValueChange = onCruisePortChange,
+                        error = if (cruisePickupPortError) "Cruise port is required" else null
                     )
-                    
+
                     EditableTextField(
                         label = "CRUISE SHIP NAME",
                         value = cruiseShipName,
-                        onValueChange = onCruiseShipChange
+                        onValueChange = onCruiseShipChange,
+                        error = if (cruisePickupShipError) "Cruise ship name is required" else null
                     )
                     
-                    EditableTextField(
+                    EditableField(
                         label = "SHIP ARRIVAL TIME",
-                        value = shipArrivalTime,
-                        onValueChange = onShipArrivalChange
+                        value = shipArrivalTime.ifEmpty { "Select time" },
+                        onClick = onShipArrivalClick,
+                        isError = false
                     )
                 }
             }
@@ -187,7 +215,20 @@ fun DropoffSection(
     onFlightNumberChange: (String) -> Unit,
     onCruiseShipChange: (String) -> Unit,
     onShipArrivalChange: (String) -> Unit,
-    onCruisePortChange: (String) -> Unit
+    onShipArrivalClick: () -> Unit,
+    onCruisePortChange: (String) -> Unit,
+    // Error states
+    dropoffLocationError: Boolean = false,
+    dropoffCoordinatesError: Boolean = false,
+    dropoffAddressValidationError: String? = null, // Address validation error message from Directions API
+    airportDropoffError: Boolean = false,
+    cruiseDropoffError: Boolean = false,
+    cruiseDropoffPortError: Boolean = false,
+    cruiseDropoffShipError: Boolean = false,
+    // Specific airport field errors
+    dropoffAirportError: Boolean = false,
+    dropoffAirlineError: Boolean = false
+    // Note: dropoff flight is NOT required (matches web app)
 ) {
     SectionHeader("Drop-off")
     
@@ -207,39 +248,45 @@ fun DropoffSection(
                         value = dropoffLocation,
                         onValueChange = onLocationChange,
                         onLocationSelected = onLocationSelected,
-                        placeholder = "Enter drop-off address"
+                        placeholder = "Enter drop-off address",
+                        error = dropoffAddressValidationError ?: if (dropoffLocationError) "Dropoff location required" else if (dropoffCoordinatesError) "Select location with coordinates" else null
                     )
                 }
             }
             // Airport dropoff - show airport, airline, flight number (matches iOS)
-            selectedTransferType == "City to Airport" || 
-            selectedTransferType == "Airport to Airport" || 
+            selectedTransferType == "City to Airport" ||
+            selectedTransferType == "Airport to Airport" ||
             selectedTransferType == "Cruise Port to Airport" -> {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     // Airport selection
                     EditableField(
                         label = "SELECT AIRPORT",
                         value = selectedDropoffAirport?.displayName ?: "Search airports...",
-                        onClick = onAirportClick
+                        onClick = onAirportClick,
+                        isError = dropoffAirportError,
+                        errorMessage = if (dropoffAirportError) "Airport is required" else null
                     )
-                    
-                    // Airline selection (matches iOS)
+
+                    // Airline selection (matches iOS) - required for dropoff airport, flight is NOT required
                     EditableField(
                         label = "SELECT AIRLINE",
                         value = selectedDropoffAirline?.displayName ?: "Select Airline",
-                        onClick = onAirlineClick
+                        onClick = onAirlineClick,
+                        isError = dropoffAirlineError,
+                        errorMessage = if (dropoffAirlineError) "Airline is required" else null
                     )
-                    
-                    // Flight number
+
+                    // Flight number - NOT required for dropoff airport (matches web app)
                     EditableTextField(
                         label = "FLIGHT / TAIL #",
                         value = dropoffFlightNumber,
-                        onValueChange = onFlightNumberChange
+                        onValueChange = onFlightNumberChange,
+                        error = null // Flight number is NOT required for dropoff airport
                     )
                 }
             }
             // Cruise Port dropoff - show address + cruise ship details (matches iOS)
-            selectedTransferType == "City to Cruise Port" || 
+            selectedTransferType == "City to Cruise Port" ||
             selectedTransferType == "Airport to Cruise Port" -> {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -254,23 +301,26 @@ fun DropoffSection(
                             placeholder = "Enter drop-off address"
                         )
                     }
-                    
+
                     EditableTextField(
                         label = "CRUISE PORT",
                         value = cruisePort,
-                        onValueChange = onCruisePortChange
+                        onValueChange = onCruisePortChange,
+                        error = if (cruiseDropoffPortError) "Cruise port is required" else null
                     )
-                    
+
                     EditableTextField(
                         label = "CRUISE SHIP NAME",
                         value = cruiseShipName,
-                        onValueChange = onCruiseShipChange
+                        onValueChange = onCruiseShipChange,
+                        error = if (cruiseDropoffShipError) "Cruise ship name is required" else null
                     )
                     
-                    EditableTextField(
-                        label = "SHIP ARRIVAL TIME",
-                        value = shipArrivalTime,
-                        onValueChange = onShipArrivalChange
+                    EditableField(
+                        label = "SHIP Departure TIME",
+                        value = shipArrivalTime.ifEmpty { "Select time" },
+                        onClick = onShipArrivalClick,
+                        isError = false
                     )
                 }
             }

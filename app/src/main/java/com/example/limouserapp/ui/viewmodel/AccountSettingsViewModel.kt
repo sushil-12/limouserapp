@@ -8,6 +8,7 @@ import com.example.limouserapp.data.model.Countries
 import com.example.limouserapp.data.model.dashboard.ProfileData
 import com.example.limouserapp.data.model.dashboard.UpdateProfileRequest
 import com.example.limouserapp.domain.usecase.dashboard.RefreshUserProfileUseCase
+import com.example.limouserapp.data.local.UserStateManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,7 +26,8 @@ import javax.inject.Inject
 @HiltViewModel
 class AccountSettingsViewModel @Inject constructor(
     private val dashboardApi: DashboardApi,
-    private val refreshUserProfileUseCase: RefreshUserProfileUseCase
+    private val refreshUserProfileUseCase: RefreshUserProfileUseCase,
+    private val userStateManager: UserStateManager
 ) : ViewModel() {
     
     private val _uiState = MutableStateFlow(AccountSettingsUiState())
@@ -373,6 +375,11 @@ class AccountSettingsViewModel @Inject constructor(
                     viewModelScope.launch {
                         refreshUserProfileUseCase()
                     }
+
+                    // Set flag to notify Dashboard to refresh profile when user navigates back
+                    // This is optimized: only Dashboard checks this flag, avoiding unnecessary API calls
+                    userStateManager.setProfileUpdatedFromAccountSettings(true)
+                    Timber.d("AccountSettings: Profile updated successfully, flag set to true")
 
                     // Store success message from API response (matches iOS)
                     val successMessage = response.message ?: "Profile updated successfully"

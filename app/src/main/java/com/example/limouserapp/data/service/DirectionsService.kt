@@ -174,5 +174,80 @@ class DirectionsService @Inject constructor(
             Pair("$minutes mins", durationSeconds)
         }
     }
+    
+    /**
+     * Validate if a route between two addresses is possible by car
+     * Returns null if route is valid, or an error message if invalid
+     * @param pickupLat Pickup latitude
+     * @param pickupLong Pickup longitude
+     * @param dropoffLat Dropoff latitude
+     * @param dropoffLong Dropoff longitude
+     * @return Pair of (isValid: Boolean, errorMessage: String?)
+     */
+    suspend fun validateRoute(
+        pickupLat: Double,
+        pickupLong: Double,
+        dropoffLat: Double,
+        dropoffLong: Double
+    ): Pair<Boolean, String?> {
+        // Validate coordinates
+        if (pickupLat == 0.0 && pickupLong == 0.0) {
+            return Pair(false, "Invalid pickup location coordinates")
+        }
+        if (dropoffLat == 0.0 && dropoffLong == 0.0) {
+            return Pair(false, "Invalid dropoff location coordinates")
+        }
+        
+        val origin = "$pickupLat,$pickupLong"
+        val destination = "$dropoffLat,$dropoffLong"
+        
+        Log.d(TAG, "🔍 Validating route: Origin=$origin, Destination=$destination")
+        
+        return try {
+            val response = directionsApi.getDirections(
+                origin = origin,
+                destination = destination,
+                waypoints = null,
+                key = NetworkConfig.GOOGLE_PLACES_API_KEY
+            )
+            
+            Log.d(TAG, "📥 Route validation response: Status=${response.status}, Error=${response.errorMessage}")
+            
+            when (response.status) {
+                "OK" -> {
+                    if (response.routes.isEmpty()) {
+                        Pair(false, "No route found between these locations")
+                    } else {
+                        // Check if route has valid legs with distance > 0
+                        val route = response.routes.first()
+                        val hasValidLegs = route.legs.any { it.distance.value > 0 }
+                        if (hasValidLegs) {
+                            Pair(true, null)
+                        } else {
+                            Pair(false, "Route is not possible by car between these locations")
+                        }
+                    }
+                }
+                "ZERO_RESULTS" -> {
+                    Pair(false, "No route found. These locations cannot be reached by car (e.g., different countries separated by ocean)")
+                }
+                "NOT_FOUND" -> {
+                    Pair(false, "One or both locations could not be found")
+                }
+                "ROUTE_NOT_FOUND" -> {
+                    Pair(false, "No route found between these locations")
+                }
+                else -> {
+                    val errorMsg = response.errorMessage ?: "Unable to validate route"
+                    Log.w(TAG, "⚠️ Route validation failed: ${response.status} - $errorMsg")
+                    Pair(false, errorMsg)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Route validation request failed: ${e.message}", e)
+            // Don't fail validation on network errors - let it pass and show error later
+            Pair(true, null)
+        }
+    }
 }
 

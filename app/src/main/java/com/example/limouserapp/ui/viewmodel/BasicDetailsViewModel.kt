@@ -185,7 +185,7 @@ class BasicDetailsViewModel @Inject constructor(
                         }
                     },
                     onFailure = { error ->
-                        val errorMessage = errorHandler.handleApiError(error)
+                        val errorMessage = errorHandler.handleError(error)
                         _uiState.value = _uiState.value.copy(
                             isLoading = false,
                             error = errorMessage
@@ -194,7 +194,7 @@ class BasicDetailsViewModel @Inject constructor(
                     }
                 )
             } catch (e: Exception) {
-                val errorMessage = errorHandler.handleApiError(e)
+                val errorMessage = errorHandler.handleError(e)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = errorMessage

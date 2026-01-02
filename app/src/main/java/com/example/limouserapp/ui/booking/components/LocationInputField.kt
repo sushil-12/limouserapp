@@ -49,7 +49,7 @@ fun LocationInputField(
         ),
         textStyle = TextStyle(
             fontFamily = GoogleSansFamily,
-            fontSize = 14.sp,
+            fontSize = 16.sp,
             fontWeight = FontWeight.Normal,
             lineHeight = 20.sp,
             letterSpacing = (-0.23).sp,

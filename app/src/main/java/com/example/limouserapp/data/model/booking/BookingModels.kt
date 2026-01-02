@@ -111,6 +111,9 @@ data class RideData(
     val originAirportCity: String? = null,
     // Return trip fields (for round trip)
     val returnPickupDate: String? = null,
-    val returnPickupTime: String? = null
+    val returnPickupTime: String? = null,
+    // Distance and duration from Google Maps Directions API (calculated once, reused)
+    val distanceMeters: Double? = null,
+    val durationSeconds: Int? = null
 )
 

@@ -579,8 +579,20 @@ private fun DialogFooter(
 
 @Composable
 private fun LoadingState() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(color = LimoGreen)
+    // Use shimmer loading instead of CircularProgressIndicator to match main screens
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(5) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .background(Color.Gray.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+            )
+        }
     }
 }
 

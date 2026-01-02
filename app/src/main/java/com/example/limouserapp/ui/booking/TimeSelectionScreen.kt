@@ -1,28 +1,27 @@
 package com.example.limouserapp.ui.booking
 
+import android.util.Log
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.border
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -34,66 +33,17 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.res.painterResource
-import com.example.limouserapp.R
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.text.input.KeyboardType
-import java.text.SimpleDateFormat
-import java.util.*
-import java.util.TimeZone
-import android.util.Log
-import androidx.compose.foundation.text.ClickableText
-import kotlin.math.*
 import com.example.limouserapp.data.model.booking.RideData
-import com.example.limouserapp.ui.theme.LimoOrange
-import com.example.limouserapp.ui.theme.LimoBlack
-import com.example.limouserapp.ui.theme.LimoWhite
-import com.example.limouserapp.ui.theme.GoogleSansFamily
-import com.example.limouserapp.ui.theme.AppDimensions
-import com.example.limouserapp.ui.utils.DebugTags
+import com.example.limouserapp.data.service.DirectionsService
 import com.example.limouserapp.ui.booking.components.CancellationPolicyWebView
 import com.example.limouserapp.ui.booking.components.DatePickerDialog
+import com.example.limouserapp.ui.booking.components.RoundTripDatePickerDialog
 import com.example.limouserapp.ui.booking.components.TimePickerDialog
-import com.example.limouserapp.data.service.DirectionsService
-import androidx.compose.runtime.rememberCoroutineScope
+import com.example.limouserapp.ui.theme.*
+import com.example.limouserapp.ui.utils.DebugTags
 import kotlinx.coroutines.launch
-import dagger.hilt.android.lifecycle.HiltViewModel
-import androidx.hilt.navigation.compose.hiltViewModel
-
-/**
- * Tab button for pickup/return selection
- */
-@Composable
-private fun TabButton(
-    text: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(44.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (isSelected) LimoOrange else Color.White,
-            contentColor = if (isSelected) Color.White else LimoBlack
-        ),
-        shape = RoundedCornerShape(8.dp),
-        border = if (!isSelected) {
-            BorderStroke(1.dp, Color.Gray.copy(alpha = 0.3f))
-        } else null
-    ) {
-        Text(
-            text = text,
-            style = TextStyle(
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                fontFamily = GoogleSansFamily
-            )
-        )
-    }
-}
+import java.text.SimpleDateFormat
+import java.util.*
 
 /**
  * Time Selection Screen - Main composable
@@ -106,7 +56,12 @@ fun TimeSelectionScreen(
     directionsService: DirectionsService,
     modifier: Modifier = Modifier
 ) {
+    // State for standard pickers (One-Way)
     var showDatePicker by remember { mutableStateOf(false) }
+
+    // State for new Round Trip picker
+    var showRoundTripDatePicker by remember { mutableStateOf(false) }
+
     var showTimePicker by remember { mutableStateOf(false) }
     var showCancellationPolicy by remember { mutableStateOf(false) }
 
@@ -115,22 +70,19 @@ fun TimeSelectionScreen(
         rideData.serviceType.equals("round_trip", ignoreCase = true)
     }
 
-    // Tab selection for round trip (0 = Pickup at, 1 = Return at)
+    // Tab selection for legacy round trip logic tracking (0 = Pickup, 1 = Return)
+    // Even in the new UI, we use this to know which *time* is being edited
     var selectedTab by remember { mutableStateOf(0) }
 
-    // Parse initial date and time from rideData
     val dateFormatter = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
     val timeFormatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
 
-    Log.d(DebugTags.BookingProcess, "Open TimeSelection with initial date=${rideData.pickupDate} time=${rideData.pickupTime}")
+    // --- State Initialization ---
 
-    // Pickup date and time
     var pickupDate by remember {
         val date = try {
             dateFormatter.parse(rideData.pickupDate) ?: Date()
-        } catch (e: Exception) {
-            Date()
-        }
+        } catch (e: Exception) { Date() }
         mutableStateOf(date)
     }
 
@@ -138,134 +90,73 @@ fun TimeSelectionScreen(
         val time = try {
             timeFormatter.parse(rideData.pickupTime) ?: Date()
         } catch (e: Exception) {
-            Calendar.getInstance().apply {
-                set(Calendar.HOUR_OF_DAY, 12)
-                set(Calendar.MINUTE, 15)
-            }.time
+            Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 12); set(Calendar.MINUTE, 15) }.time
         }
         mutableStateOf(time)
     }
 
-    // Track if return time has been manually set by user
-    var isReturnTimeManuallySet by remember {
-        mutableStateOf(isRoundTrip && rideData.returnPickupTime != null)
-    }
-
-    // Store calculated outbound dropoff time for return calculation
-    var outboundDropoffTime by remember { mutableStateOf<Date?>(null) }
-    var outboundDurationSeconds by remember { mutableStateOf(0) }
-
-    // Return date and time (for round trip)
     var returnDate by remember {
         val date = if (isRoundTrip && rideData.returnPickupDate != null) {
-            try {
-                dateFormatter.parse(rideData.returnPickupDate) ?: Date()
-            } catch (e: Exception) {
-                Date()
-            }
-        } else {
-            Date()
-        }
+            try { dateFormatter.parse(rideData.returnPickupDate) ?: Date() } catch (e: Exception) { Date() }
+        } else { Date() }
         mutableStateOf(date)
     }
 
     var returnTime by remember {
         val time = if (isRoundTrip && rideData.returnPickupTime != null) {
-            try {
-                timeFormatter.parse(rideData.returnPickupTime) ?: Date()
-            } catch (e: Exception) {
-                Calendar.getInstance().apply {
-                    set(Calendar.HOUR_OF_DAY, 12)
-                    set(Calendar.MINUTE, 15)
-                }.time
+            try { timeFormatter.parse(rideData.returnPickupTime) ?: Date() } catch (e: Exception) {
+                Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 12); set(Calendar.MINUTE, 15) }.time
             }
         } else {
-            Calendar.getInstance().apply {
-                set(Calendar.HOUR_OF_DAY, 12)
-                set(Calendar.MINUTE, 15)
-            }.time
+            Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 12); set(Calendar.MINUTE, 15) }.time
         }
         mutableStateOf(time)
     }
 
-    // Track last calculated values to prevent recalculation loops
-    var lastCalculatedPickupTime by remember { mutableStateOf<Long?>(null) }
-    var lastCalculatedDropoffTime by remember { mutableStateOf<Long?>(null) }
+    // Logic Variables
+    var calculatedDistanceMeters by remember { mutableStateOf<Double?>(null) }
+    var calculatedDurationSeconds by remember { mutableStateOf<Int?>(null) }
+    var isReturnTimeManuallySet by remember { mutableStateOf(isRoundTrip && rideData.returnPickupTime != null) }
+    var outboundDropoffTime by remember { mutableStateOf<Date?>(null) }
 
-    // Current selected date and time based on active tab
+    // Determine active Date/Time for standard pickers
     val selectedDate = if (selectedTab == 0) pickupDate else returnDate
     val selectedTime = if (selectedTab == 0) pickupTime else returnTime
 
-    // Update selected date/time based on active tab
+    // --- Helper Functions ---
+
     fun updateSelectedDate(date: Date) {
         if (selectedTab == 0) {
             pickupDate = date
-            // Reset last calculated values so return time can be recalculated
-            if (isRoundTrip && !isReturnTimeManuallySet) {
-                lastCalculatedPickupTime = null
-                lastCalculatedDropoffTime = null
-            }
         } else {
             returnDate = date
-            // Mark return time as manually set when user changes return date
             isReturnTimeManuallySet = true
-            Log.d(DebugTags.BookingProcess, "✏️ Return date manually set by user: ${dateFormatter.format(date)}")
         }
     }
 
     fun updateSelectedTime(time: Date) {
         if (selectedTab == 0) {
             pickupTime = time
-            // Reset last calculated values so return time can be recalculated
-            if (isRoundTrip && !isReturnTimeManuallySet) {
-                lastCalculatedPickupTime = null
-                lastCalculatedDropoffTime = null
-            }
         } else {
             returnTime = time
-            // Mark return time as manually set when user changes it
             isReturnTimeManuallySet = true
-            Log.d(DebugTags.BookingProcess, "✏️ Return time manually set by user: ${timeFormatter.format(time)}")
         }
     }
 
-    // Calculate return time based on outbound dropoff + buffer (30 minutes default)
-    fun calculateReturnTimeFromDropoff(dropoffTime: Date, bufferMinutes: Int = 30) {
-        if (isRoundTrip && !isReturnTimeManuallySet) {
-            // Calculate return time: dropoff time + buffer
+    // Auto-calculate return time
+    LaunchedEffect(pickupTime, pickupDate, outboundDropoffTime, isReturnTimeManuallySet) {
+        if (isRoundTrip && !isReturnTimeManuallySet && outboundDropoffTime != null) {
             val returnCalendar = Calendar.getInstance()
-            returnCalendar.time = dropoffTime
-            returnCalendar.add(Calendar.MINUTE, bufferMinutes)
-            
+            returnCalendar.time = outboundDropoffTime
+            returnCalendar.add(Calendar.MINUTE, 30) // Buffer
+
+            // Only update if dates align significantly (simple logic)
             returnDate = returnCalendar.time
             returnTime = returnCalendar.time
-            
-            Log.d(DebugTags.BookingProcess, "🔄 Auto-calculated return time: ${dateFormatter.format(returnDate)} ${timeFormatter.format(returnTime)} (dropoff + $bufferMinutes min buffer)")
         }
     }
 
-    // Recalculate return time when pickup time or outbound duration changes (only if not manually set)
-    // Only recalculate if values actually changed
-    LaunchedEffect(
-        pickupTime.time,
-        pickupDate.time,
-        outboundDropoffTime?.time,
-        isReturnTimeManuallySet
-    ) {
-        val dropoffTime = outboundDropoffTime
-        if (isRoundTrip && !isReturnTimeManuallySet && dropoffTime != null) {
-            val currentPickupTime = pickupTime.time
-            val currentDropoffTime = dropoffTime.time
-            
-            // Only recalculate if pickup time or dropoff time actually changed
-            if (lastCalculatedPickupTime != currentPickupTime || 
-                lastCalculatedDropoffTime != currentDropoffTime) {
-                calculateReturnTimeFromDropoff(dropoffTime)
-                lastCalculatedPickupTime = currentPickupTime
-                lastCalculatedDropoffTime = currentDropoffTime
-            }
-        }
-    }
+    // --- UI Structure ---
 
     Column(
         modifier = modifier
@@ -277,120 +168,141 @@ fun TimeSelectionScreen(
         // Header
         TimeSelectionHeader(onDismiss = onDismiss)
 
-        // Tabs for round trip (Pickup at / Return at)
         if (isRoundTrip) {
-            Row(
+            // =========================================================
+            // MODERN ROUND TRIP UI
+            // =========================================================
+
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp, vertical = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Pickup at tab
-                TabButton(
-                    text = "Pickup at",
-                    isSelected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    modifier = Modifier.weight(1f)
+
+                // 1. Date Selection Row (Unified Split Container)
+                SubtleSplitInputRow(
+                    startLabel = "DEPART",
+                    startValue = formatDate(pickupDate),
+                    startIcon = Icons.Default.CalendarToday,
+                    endLabel = "RETURN",
+                    endValue = formatDate(returnDate),
+                    endIcon = Icons.Default.Event, // Or keep CalendarToday
+                    onStartClick = { showRoundTripDatePicker = true },
+                    onEndClick = { showRoundTripDatePicker = true }
                 )
-                // Return at tab
-                TabButton(
-                    text = "Return at",
-                    isSelected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    modifier = Modifier.weight(1f)
+
+                // 2. Time Selection Row (Unified Split Container)
+                SubtleSplitInputRow(
+                    startLabel = "PICKUP TIME",
+                    startValue = formatTime(pickupTime),
+                    startIcon = Icons.Default.Schedule,
+                    endLabel = "RETURN TIME",
+                    endValue = formatTime(returnTime),
+                    endIcon = Icons.Default.Schedule,
+                    onStartClick = {
+                        selectedTab = 0
+                        showTimePicker = true
+                    },
+                    onEndClick = {
+                        selectedTab = 1
+                        showTimePicker = true
+                    }
                 )
             }
-        }
 
-        // Date display - tappable
-        TextButton(
-            onClick = { showDatePicker = true },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 8.dp),
-            contentPadding = PaddingValues(0.dp)
-        ) {
-            Text(
-                formatDate(selectedDate),
-                style = TextStyle(
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = LimoBlack
-                ),
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                color = Color.Gray.copy(alpha = 0.1f)
             )
         }
+        else {
+            // =========================================================
+            // ONE WAY UI (Legacy Logic)
+            // =========================================================
 
-        HorizontalDivider(
-            modifier = Modifier.padding(horizontal = 24.dp),
-            color = Color.Gray.copy(alpha = 0.3f)
-        )
+            // Date display - tappable
+            TextButton(
+                onClick = {
+                    selectedTab = 0
+                    showDatePicker = true
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Text(
+                    formatDate(pickupDate),
+                    style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, color = LimoBlack),
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+            }
 
-        // Time display - tappable
-        TextButton(
-            onClick = { showTimePicker = true },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 8.dp),
-            contentPadding = PaddingValues(0.dp)
-        ) {
-            Text(
-                formatTime(selectedTime),
-                style = TextStyle(
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = LimoBlack
-                ),
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
-            )
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 24.dp), color = Color.Gray.copy(alpha = 0.3f))
+
+            // Time display - tappable
+            TextButton(
+                onClick = {
+                    selectedTab = 0
+                    showTimePicker = true
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Text(
+                    formatTime(pickupTime),
+                    style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, color = LimoBlack),
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 24.dp), color = Color.Gray.copy(alpha = 0.3f))
         }
 
-        HorizontalDivider(
-            modifier = Modifier.padding(horizontal = 24.dp),
-            color = Color.Gray.copy(alpha = 0.3f)
-        )
+        // --- Shared Footer Section ---
 
-        // Top spacer for centering
         Spacer(modifier = Modifier.weight(0.1f))
-        // Trip Details Section - centered
+
+        // Trip Details (Rates/Distance)
         TripDetailsSection(
             rideData = rideData,
             pickupDate = if (selectedTab == 0) pickupDate else returnDate,
             pickupTime = if (selectedTab == 0) pickupTime else returnTime,
             directionsService = directionsService,
-            onOutboundDropoffCalculated = if (selectedTab == 0) { dropoffTime, durationSeconds ->
-                // Store outbound dropoff time and duration for return calculation
-                outboundDropoffTime = dropoffTime
-                outboundDurationSeconds = durationSeconds
-            } else null,
+            onOutboundDropoffCalculated = { dropoffTime, duration ->
+                if (selectedTab == 0) { // Only update based on outbound leg
+                    outboundDropoffTime = dropoffTime
+                    calculatedDurationSeconds = duration
+                }
+            },
+            onDistanceCalculated = { distance, _ ->
+                if (selectedTab == 0) calculatedDistanceMeters = distance
+            },
             modifier = Modifier.padding(horizontal = 24.dp)
         )
 
-        // Bottom spacer for centering
         Spacer(modifier = Modifier.weight(0.7f))
 
-        // Disclaimer text
         DisclaimerText(
             onCancellationPolicyClick = { showCancellationPolicy = true },
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
         )
 
-        // Next button
         Button(
             onClick = {
-                // Update ride data with selected date and time
                 val updatedRideData = rideData.copy(
                     pickupDate = dateFormatter.format(pickupDate),
                     pickupTime = timeFormatter.format(pickupTime),
                     returnPickupDate = if (isRoundTrip) dateFormatter.format(returnDate) else null,
-                    returnPickupTime = if (isRoundTrip) timeFormatter.format(returnTime) else null
+                    returnPickupTime = if (isRoundTrip) timeFormatter.format(returnTime) else null,
+                    distanceMeters = calculatedDistanceMeters,
+                    durationSeconds = calculatedDurationSeconds
                 )
-                Log.d(DebugTags.BookingProcess, "Time selected pickup date=${updatedRideData.pickupDate} time=${updatedRideData.pickupTime}")
-                if (isRoundTrip) {
-                    Log.d(DebugTags.BookingProcess, "Return date=${updatedRideData.returnPickupDate} time=${updatedRideData.returnPickupTime}")
-                }
                 onNavigateToPaxLuggageVehicle(updatedRideData)
             },
             modifier = Modifier
@@ -400,25 +312,30 @@ fun TimeSelectionScreen(
             colors = ButtonDefaults.buttonColors(containerColor = LimoOrange),
             shape = RoundedCornerShape(8.dp)
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Next",
-                    style = TextStyle(
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White
-                    )
-                )
-            }
+            Text("Next", style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.White))
         }
 
         Spacer(modifier = Modifier.height(40.dp))
     }
 
-    // Date Picker Dialog
+    // --- DIALOGS ---
+
+    // 1. New Round Trip Picker (Unified)
+    if (showRoundTripDatePicker) {
+        RoundTripDatePickerDialog(
+            initialStartDate = pickupDate,
+            initialEndDate = returnDate,
+            onDismiss = { showRoundTripDatePicker = false },
+            onDateRangeSelected = { start, end ->
+                pickupDate = start
+                returnDate = end
+                isReturnTimeManuallySet = true
+                showRoundTripDatePicker = false
+            }
+        )
+    }
+
+    // 2. Standard Date Picker (One-Way)
     if (showDatePicker) {
         DatePickerDialog(
             selectedDate = selectedDate,
@@ -430,7 +347,7 @@ fun TimeSelectionScreen(
         )
     }
 
-    // Time Picker Dialog
+    // 3. Time Picker (Used for both)
     if (showTimePicker) {
         TimePickerDialog(
             selectedTime = selectedTime,
@@ -442,17 +359,9 @@ fun TimeSelectionScreen(
         )
     }
 
-    // Cancellation Policy WebView
     if (showCancellationPolicy) {
-        CancellationPolicyWebView(
-            onDismiss = { showCancellationPolicy = false }
-        )
+        CancellationPolicyWebView(onDismiss = { showCancellationPolicy = false })
     }
-}
-
-enum class TimeType {
-    PICKUP_AT,
-    DROPOFF_BY
 }
 
 @Composable
@@ -470,7 +379,7 @@ private fun TimeSelectionHeader(onDismiss: () -> Unit) {
             }
 
             Text(
-                "Select Pickup Date & Time",
+                "Select Date & Time",
                 style = TextStyle(
                     fontSize = 20.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -479,7 +388,7 @@ private fun TimeSelectionHeader(onDismiss: () -> Unit) {
             )
 
             // Invisible IconButton to center title
-            IconButton(onClick = {}) {
+            IconButton(onClick = {}, enabled = false) {
                 Icon(Icons.Default.ArrowBack, contentDescription = null, tint = Color.Transparent)
             }
         }
@@ -543,22 +452,24 @@ private fun DisclaimerText(
     )
 }
 
+// --- Trip Details Section & Shimmer ---
+
 @Composable
-private fun TripDetailsSection(
+fun TripDetailsSection(
     rideData: RideData,
     pickupDate: Date,
     pickupTime: Date,
     directionsService: DirectionsService,
     onOutboundDropoffCalculated: ((Date, Int) -> Unit)? = null,
+    onDistanceCalculated: ((Double, Int) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var tripDetails by remember { mutableStateOf<TripDetails?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     val coroutineScope = rememberCoroutineScope()
-    
-    // Calculate trip details using DirectionsService
+
     LaunchedEffect(rideData.pickupLat, rideData.pickupLong, rideData.destinationLat, rideData.destinationLong, pickupDate, pickupTime) {
-        if (rideData.pickupLat != null && rideData.pickupLong != null && 
+        if (rideData.pickupLat != null && rideData.pickupLong != null &&
             rideData.destinationLat != null && rideData.destinationLong != null) {
             isLoading = true
             coroutineScope.launch {
@@ -567,11 +478,12 @@ private fun TripDetailsSection(
                         rideData.pickupLat!!, rideData.pickupLong!!,
                         rideData.destinationLat!!, rideData.destinationLong!!
                     )
-                    
+
+                    onDistanceCalculated?.invoke(distanceMeters.toDouble(), durationSeconds)
+
                     val distanceKm = distanceMeters / 1000.0
                     val durationMinutes = durationSeconds / 60
-                    
-                    // Combine pickup date and time properly
+
                     val pickupCalendar = Calendar.getInstance()
                     pickupCalendar.time = pickupDate
                     val pickupTimeCalendar = Calendar.getInstance()
@@ -579,18 +491,16 @@ private fun TripDetailsSection(
                     pickupCalendar.set(Calendar.HOUR_OF_DAY, pickupTimeCalendar.get(Calendar.HOUR_OF_DAY))
                     pickupCalendar.set(Calendar.MINUTE, pickupTimeCalendar.get(Calendar.MINUTE))
                     pickupCalendar.set(Calendar.SECOND, pickupTimeCalendar.get(Calendar.SECOND))
-                    
-                    // Calculate dropoff time: pickup datetime + duration
+
                     pickupCalendar.add(Calendar.SECOND, durationSeconds)
                     val dropoffTime = pickupCalendar.time
-                    
-                    // Notify parent about calculated dropoff time (for return time calculation)
+
                     onOutboundDropoffCalculated?.invoke(dropoffTime, durationSeconds)
-                    
+
                     val dropoffTimeFormatter = SimpleDateFormat("h:mm a z", Locale.getDefault())
                     dropoffTimeFormatter.timeZone = TimeZone.getDefault()
                     val dropoffTimeStr = "${dropoffTimeFormatter.format(dropoffTime)} drop-off time"
-                    
+
                     val hours = durationMinutes / 60
                     val minutes = durationMinutes % 60
                     val durationStr = if (hours > 0) {
@@ -598,9 +508,9 @@ private fun TripDetailsSection(
                     } else {
                         "About $minutes mins trip"
                     }
-                    
+
                     val distanceStr = "${String.format("%.1f", distanceKm)} km Estimated Distance"
-                    
+
                     tripDetails = TripDetails(
                         dropoffTime = dropoffTimeStr,
                         duration = durationStr,
@@ -609,7 +519,6 @@ private fun TripDetailsSection(
                     isLoading = false
                 } catch (e: Exception) {
                     Log.e(DebugTags.BookingProcess, "Error calculating trip details: ${e.message}", e)
-                    // Fallback to default values
                     val calendar = Calendar.getInstance()
                     calendar.time = pickupTime
                     calendar.add(Calendar.HOUR, 2)
@@ -625,7 +534,6 @@ private fun TripDetailsSection(
                 }
             }
         } else {
-            // Default values if coordinates are not available
             val calendar = Calendar.getInstance()
             calendar.time = pickupTime
             calendar.add(Calendar.HOUR, 2)
@@ -646,7 +554,6 @@ private fun TripDetailsSection(
         contentAlignment = Alignment.Center
     ) {
         if (isLoading) {
-            // NEW: Nice lighter shimmer effect
             TripDetailsShimmer(
                 modifier = Modifier.width(246.dp)
             )
@@ -658,7 +565,6 @@ private fun TripDetailsSection(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Drop-off time - larger, more prominent
                 Text(
                     text = tripDetails!!.dropoffTime,
                     style = TextStyle(
@@ -672,7 +578,6 @@ private fun TripDetailsSection(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Trip duration - medium size, secondary info
                 Text(
                     text = tripDetails!!.duration,
                     style = TextStyle(
@@ -686,7 +591,6 @@ private fun TripDetailsSection(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Estimated distance - same as trip duration
                 Text(
                     text = tripDetails!!.distance,
                     style = TextStyle(
@@ -704,8 +608,6 @@ private fun TripDetailsSection(
     }
 }
 
-// --- NEW SHIMMER COMPONENTS ---
-
 @Composable
 fun TripDetailsShimmer(modifier: Modifier = Modifier) {
     Column(
@@ -713,7 +615,6 @@ fun TripDetailsShimmer(modifier: Modifier = Modifier) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Drop-off time placeholder (Large)
         Box(
             modifier = Modifier
                 .height(24.dp)
@@ -722,7 +623,6 @@ fun TripDetailsShimmer(modifier: Modifier = Modifier) {
                 .shimmerEffect()
         )
 
-        // Duration placeholder (Medium)
         Box(
             modifier = Modifier
                 .height(16.dp)
@@ -731,7 +631,6 @@ fun TripDetailsShimmer(modifier: Modifier = Modifier) {
                 .shimmerEffect()
         )
 
-        // Distance placeholder (Medium)
         Box(
             modifier = Modifier
                 .height(16.dp)
@@ -742,7 +641,6 @@ fun TripDetailsShimmer(modifier: Modifier = Modifier) {
     }
 }
 
-// Lighter shimmer effect extension
 fun Modifier.shimmerEffect(): Modifier = composed {
     var size by remember { mutableStateOf(IntSize.Zero) }
     val transition = rememberInfiniteTransition(label = "Shimmer")
@@ -758,10 +656,9 @@ fun Modifier.shimmerEffect(): Modifier = composed {
 
     background(
         brush = Brush.linearGradient(
-            // Much lighter gray colors for a subtle effect
             colors = listOf(
                 Color(0xFFF2F2F2),
-                Color(0xFFFCFCFC), // Nearly white highlight
+                Color(0xFFFCFCFC),
                 Color(0xFFF2F2F2),
             ),
             start = Offset(startOffsetX, 0f),
@@ -778,19 +675,7 @@ private data class TripDetails(
     val distance: String
 )
 
-private fun calculateDistanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    val earthRadius = 6371.0 // Earth's radius in km
-
-    val dLat = Math.toRadians(lat2 - lat1)
-    val dLon = Math.toRadians(lon2 - lon1)
-
-    val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
-            Math.sin(dLon / 2) * Math.sin(dLon / 2)
-
-    val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    return earthRadius * c
-}
+// --- Format Utilities ---
 
 private fun formatDate(date: Date): String {
     val formatter = SimpleDateFormat("EEE, d MMM", Locale.getDefault())
@@ -802,10 +687,148 @@ private fun formatTime(date: Date): String {
     return formatter.format(date)
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFFFFFFFF)
+/**
+ * Tab button for pickup/return selection (Used only for legacy One-Way views)
+ */
 @Composable
-private fun TimeSelectionScreenPreview() {
-    MaterialTheme {
-        Text("Time Selection Screen Preview - DirectionsService required for full functionality")
+private fun TabButton(
+    text: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(44.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (isSelected) LimoOrange else Color.White,
+            contentColor = if (isSelected) Color.White else LimoBlack
+        ),
+        shape = RoundedCornerShape(8.dp),
+        border = if (!isSelected) {
+            BorderStroke(1.dp, Color.Gray.copy(alpha = 0.3f))
+        } else null
+    ) {
+        Text(
+            text = text,
+            style = TextStyle(
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = GoogleSansFamily
+            )
+        )
+    }
+}
+
+@Composable
+fun SubtleSplitInputRow(
+    startLabel: String,
+    startValue: String,
+    startIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    endLabel: String,
+    endValue: String,
+    endIcon: androidx.compose.ui.graphics.vector.ImageVector,
+    onStartClick: () -> Unit,
+    onEndClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFFF9F9F9), // Very light gray fill
+        border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f)), // Subtle outline
+        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min) // Important for vertical divider
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+
+            // --- Left Section ---
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onStartClick)
+                    .padding(vertical = 12.dp, horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Icon
+                Icon(
+                    imageVector = startIcon,
+                    contentDescription = null,
+                    tint = LimoOrange, // or Color.Gray for even more subtlety
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+
+                // Text Data
+                Column {
+                    Text(
+                        text = startLabel,
+                        style = TextStyle(
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Gray,
+                            letterSpacing = 1.sp
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = startValue,
+                        style = TextStyle(
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = LimoBlack
+                        ),
+                        maxLines = 1
+                    )
+                }
+            }
+
+            // --- Vertical Divider ---
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .padding(vertical = 8.dp) // Leave some gap at top/bottom
+                    .background(Color.Gray.copy(alpha = 0.2f))
+            )
+
+            // --- Right Section ---
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onEndClick)
+                    .padding(vertical = 12.dp, horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Icon
+                Icon(
+                    imageVector = endIcon,
+                    contentDescription = null,
+                    tint = LimoOrange,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+
+                // Text Data
+                Column {
+                    Text(
+                        text = endLabel,
+                        style = TextStyle(
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Gray,
+                            letterSpacing = 1.sp
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = endValue,
+                        style = TextStyle(
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = LimoBlack
+                        ),
+                        maxLines = 1
+                    )
+                }
+            }
+        }
     }
 }

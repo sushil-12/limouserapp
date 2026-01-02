@@ -274,11 +274,21 @@ private fun VehicleSelectionCard(
                     }
 
                     // Round Trip Row
-                    if (priceRoundTrip != null || isRoundTrip) {
-                        ServiceTypeRow(
-                            label = "Round trip",
-                            price = priceRoundTrip ?: currentPrice,
-                            isChecked = isRoundTrip
+//                    if (priceRoundTrip != null || isRoundTrip) {
+//                        ServiceTypeRow(
+//                            label = "Round trip",
+//                            price = priceRoundTrip ?: currentPrice,
+//                            isChecked = isRoundTrip
+//                        )
+//                    }
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                        Text(
+                            "All Inclusive Rates *",
+                            style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium, color = LimoBlack)
+                        )
+                        Text(
+                            "(Some Taxes, and Tolls are additional)",
+                            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal, color = Color.Gray)
                         )
                     }
                 }
@@ -305,16 +315,7 @@ private fun VehicleSelectionCard(
             }
 
             // Disclaimer
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                Text(
-                    "All Inclusive Rates *",
-                    style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium, color = LimoBlack)
-                )
-                Text(
-                    "(Some Taxes, and Tolls are additional)",
-                    style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal, color = Color.Gray)
-                )
-            }
+
 
             Spacer(modifier = Modifier.height(12.dp))
             HorizontalDivider(color = Color(0xFFEEEEEE), thickness = 1.dp)
@@ -688,6 +689,23 @@ private fun getDynamicTravelInfo(rideData: RideData): String {
         return "Charter Tour"
     }
 
+    // Use pre-calculated distance and duration from Google Maps Directions API if available
+    // This avoids recalculating distance that was already calculated in TimeSelectionScreen
+    if (rideData.distanceMeters != null && rideData.durationSeconds != null) {
+        val distanceMiles = rideData.distanceMeters / 1609.34 // Convert meters to miles
+        val durationMinutes = rideData.durationSeconds / 60
+        val hours = durationMinutes / 60
+        val minutes = durationMinutes % 60
+        val distanceMilesFormatted = String.format("%.1f", distanceMiles)
+
+        return if (hours > 0) {
+            "$hours hours, $minutes minutes / $distanceMilesFormatted miles"
+        } else {
+            "$minutes minutes / $distanceMilesFormatted miles"
+        }
+    }
+
+    // Fallback to haversine calculation only if distance wasn't pre-calculated
     val pickupLat = rideData.pickupLat
     val pickupLong = rideData.pickupLong
     val destLat = rideData.destinationLat

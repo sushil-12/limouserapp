@@ -1,7 +1,6 @@
 package com.example.limouserapp.ui
 
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -24,21 +23,21 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.limouserapp.data.model.dashboard.CardData
+import com.example.limouserapp.ui.components.ErrorAlertDialog
 import com.example.limouserapp.ui.components.SavedCardView
+import com.example.limouserapp.ui.components.SuccessAlertDialog
 import com.example.limouserapp.ui.theme.GoogleSansFamily
 import com.example.limouserapp.ui.theme.LimoOrange
 import com.example.limouserapp.ui.viewmodel.MyCardsViewModel
@@ -52,32 +51,19 @@ fun MyCardsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    // Alert Handling
-    if (uiState.showSuccessAlert) {
-        AlertDialog(
-            onDismissRequest = { viewModel.dismissSuccessAlert() },
-            title = { Text("Success", fontFamily = GoogleSansFamily) },
-            text = { Text(uiState.successMessage, fontFamily = GoogleSansFamily) },
-            confirmButton = {
-                TextButton(onClick = { viewModel.dismissSuccessAlert() }) {
-                    Text("OK", fontFamily = GoogleSansFamily)
-                }
-            }
-        )
-    }
+    // Success Alert Dialog
+    SuccessAlertDialog(
+        isVisible = uiState.showSuccessAlert,
+        onDismiss = { viewModel.dismissSuccessAlert() },
+        message = uiState.successMessage
+    )
 
-    if (uiState.showErrorAlert) {
-        AlertDialog(
-            onDismissRequest = { viewModel.dismissErrorAlert() },
-            title = { Text("Error", fontFamily = GoogleSansFamily) },
-            text = { Text(uiState.errorMessage, fontFamily = GoogleSansFamily) },
-            confirmButton = {
-                TextButton(onClick = { viewModel.dismissErrorAlert() }) {
-                    Text("OK", fontFamily = GoogleSansFamily)
-                }
-            }
-        )
-    }
+    // Error Alert Dialog
+    ErrorAlertDialog(
+        isVisible = uiState.showErrorAlert,
+        onDismiss = { viewModel.dismissErrorAlert() },
+        message = uiState.errorMessage
+    )
 
     // Main Scaffold with fixed bottom bar for action buttons
     // CRITICAL: Set contentWindowInsets to WindowInsets(0) to prevent double padding

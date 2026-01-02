@@ -18,6 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
+import timber.log.Timber
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed // Required for the shimmer effect
@@ -30,6 +32,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,19 +41,17 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.limouserapp.ui.components.GoogleMapView
 import com.example.limouserapp.ui.components.NavigationDrawer
-import com.example.limouserapp.ui.booking.ScheduleRideScreen
 import com.example.limouserapp.ui.components.SocketStatusIndicator
 import com.example.limouserapp.ui.components.UserBookingCard
 import com.example.limouserapp.ui.components.ContactBottomSheet
 import com.example.limouserapp.ui.theme.LimoOrange
 import com.example.limouserapp.ui.viewmodel.DashboardViewModel
-import com.example.limouserapp.data.service.DirectionsService
-import com.example.limouserapp.data.model.booking.ReservationData
-import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.limouserapp.data.model.dashboard.UserProfile
 import dagger.hilt.android.EntryPointAccessors
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import com.example.limouserapp.di.DirectionsServiceEntryPoint
+import com.example.limouserapp.di.UserStateManagerEntryPoint
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +64,7 @@ fun DashboardScreen(
     onNavigateToMyCards: () -> Unit = {},
     onNavigateToInvoices: () -> Unit = {},
     onNavigateToEditBooking: (Int) -> Unit = {},
+    onNavigateToScheduleRide: () -> Unit = {},
     onLogout: () -> Unit = {},
     hasLocationPermission: Boolean = false,
     onRequestLocationPermission: () -> Unit = {},
@@ -82,6 +84,42 @@ fun DashboardScreen(
         ).directionsService()
     }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // Get UserStateManager to check profile update flag
+    val userStateManager = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            com.example.limouserapp.di.UserStateManagerEntryPoint::class.java
+        ).userStateManager()
+    }
+
+    // Track the last route to detect when Dashboard becomes active
+    var lastRoute by remember { mutableStateOf<String?>(null) }
+    val currentRoute = navController.currentDestination?.route
+    
+    // Optimized: Only refresh profile when returning from AccountSettings (not on every Dashboard activation)
+    LaunchedEffect(currentRoute) {
+        Timber.d("DashboardScreen: Route changed - currentRoute=$currentRoute, lastRoute=$lastRoute")
+        
+        // Check if route contains "dashboard" (handles query parameters)
+        val isDashboardRoute = currentRoute?.contains("dashboard") == true
+        
+        // Only check when route actually changes TO dashboard (not on every recomposition)
+        if (isDashboardRoute && lastRoute?.contains("dashboard") != true) {
+            Timber.d("DashboardScreen: Dashboard route activated, checking profile update flag")
+            checkAndRefreshProfileIfNeeded(userStateManager, viewModel)
+        }
+        // Update last route
+        lastRoute = currentRoute
+    }
+    
+    // Also check on initial composition (fallback for when user stays on AccountSettings and navigates back)
+    LaunchedEffect(Unit) {
+        Timber.d("DashboardScreen: Initial composition, checking profile update flag")
+        // Small delay to ensure UserStateManager is ready
+        delay(100)
+        checkAndRefreshProfileIfNeeded(userStateManager, viewModel)
+    }
 
     // Open drawer if requested
     LaunchedEffect(shouldOpenDrawer) {
@@ -108,6 +146,7 @@ fun DashboardScreen(
     var showBookingSuccess by remember { mutableStateOf(false) }
     var pendingRideData by remember { mutableStateOf<com.example.limouserapp.data.model.booking.RideData?>(null) }
     var pendingReservationData by remember { mutableStateOf<com.example.limouserapp.data.model.booking.ReservationData?>(null) }
+    var pendingIsEditMode by remember { mutableStateOf(false) }
 
     // Booking Action States
     var editBookingId by remember { mutableStateOf<Int?>(null) }
@@ -222,24 +261,6 @@ fun DashboardScreen(
                 .padding(end = 16.dp, top = 16.dp)
         )
 
-        // Recenter Button
-//        Card(
-//            modifier = Modifier
-//                .align(Alignment.BottomEnd)
-//                .padding(end = 16.dp, bottom = 320.dp) // Adjusted to sit above expanded sheet
-//                .size(48.dp),
-//            shape = CircleShape,
-//            colors = CardDefaults.cardColors(containerColor = Color.White),
-//            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-//        ) {
-//            IconButton(
-//                onClick = { /* Recenter Map Logic */ },
-//                modifier = Modifier.fillMaxSize()
-//            ) {
-//                Icon(Icons.Default.MyLocation, contentDescription = "My Location", tint = Color.Black)
-//            }
-//        }
-
         // 3. Draggable Bottom Sheet
         val configuration = LocalConfiguration.current
         val screenHeightPx = with(LocalDensity.current) { configuration.screenHeightDp.dp.toPx() }
@@ -283,16 +304,8 @@ fun DashboardScreen(
 
                 Spacer(Modifier.height(20.dp))
 
-                // Greeting
-                Text(
-                    text = "Hey there, ${uiState.userProfile?.firstName ?: "there"}",
-                    style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Color.Gray)
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "Schedule your next booking",
-                    style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold, color = LimoOrange)
-                )
+                // Header with dynamic sizing
+                HomeHeader(HomeUiState(uiState.userProfile))
 
                 Spacer(Modifier.height(16.dp))
 
@@ -306,7 +319,7 @@ fun DashboardScreen(
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
-                        ) { showBookingSheet = true }
+                        ) { onNavigateToScheduleRide() }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 16.dp),
@@ -416,7 +429,7 @@ fun DashboardScreen(
                 onNavigateToDashboard = { openDrawer, isCreateBooking ->
                     viewModel.closeNavigationDrawer()
                     if (isCreateBooking) {
-                        showBookingSheet = true
+                        onNavigateToScheduleRide()
                         pendingRideData = null
                         showTimeSelection = false
                     }
@@ -426,19 +439,7 @@ fun DashboardScreen(
             )
         }
 
-        // Booking Flow Screens
-        if (showBookingSheet) {
-            ScheduleRideScreen(
-                onDismiss = { showBookingSheet = false },
-                onNavigateToTimeSelection = { rideData ->
-                    pendingRideData = rideData
-                    showBookingSheet = false
-                    showTimeSelection = true
-                },
-                initialRideData = pendingRideData,
-                navController = navController
-            )
-        }
+        // Booking Flow Screens - ScheduleRideScreen now handled via navigation destination
 
         if (showTimeSelection && pendingRideData != null) {
             com.example.limouserapp.ui.booking.TimeSelectionScreen(
@@ -511,10 +512,14 @@ fun DashboardScreen(
                 },
                 onSuccess = { reservationData ->
                     showComprehensiveBooking = false
+                    // Store reservation data and edit mode state for success screen
+                    pendingReservationData = reservationData
+                    // Note: editBookingId is cleared after success, so we need to track it before clearing
+                    val wasEditMode = editBookingId != null
                     editBookingId = null
                     repeatBookingId = null
-                    // Store reservation data for success screen
-                    pendingReservationData = reservationData
+                    // Store edit mode state before showing success screen
+                    pendingIsEditMode = wasEditMode
                     showBookingSuccess = true
                     viewModel.refreshDashboard()
                 },
@@ -528,15 +533,19 @@ fun DashboardScreen(
 
         if (showBookingSuccess) {
             val hasDriver = (selectedVehicle?.driverInformation?.id ?: 0) > 0
+            val isMasterVehicle = selectedVehicle?.isMasterVehicle ?: false
             com.example.limouserapp.ui.booking.BookingSuccessScreen(
                 onOK = {
                     showBookingSuccess = false
                     pendingRideData = null
                     pendingReservationData = null
+                    pendingIsEditMode = false
                     selectedVehicle = null
                     selectedMasterVehicle = null
                 },
                 hasDriverAssigned = hasDriver,
+                isMasterVehicle = isMasterVehicle,
+                isEditMode = pendingIsEditMode,
                 reservationId = pendingReservationData?.reservationId,
                 orderId = pendingReservationData?.orderId,
                 returnReservationId = pendingReservationData?.returnReservationId
@@ -548,6 +557,81 @@ fun DashboardScreen(
             driverName = contactDriverName,
             isVisible = showContactSheet,
             onDismiss = { showContactSheet = false }
+        )
+    }
+}
+
+/**
+ * Helper function to check and refresh profile if needed
+ */
+private fun checkAndRefreshProfileIfNeeded(
+    userStateManager: com.example.limouserapp.data.local.UserStateManager,
+    viewModel: DashboardViewModel
+) {
+    val profileUpdated = userStateManager.getProfileUpdatedFromAccountSettings()
+    Timber.d("DashboardScreen: Profile update flag = $profileUpdated")
+    
+    if (profileUpdated) {
+        Timber.d("DashboardScreen: Profile was updated from AccountSettings, refreshing profile...")
+        // Clear flag first to prevent multiple refreshes
+        userStateManager.setProfileUpdatedFromAccountSettings(false)
+        // Refresh user profile from API to get updated name
+        viewModel.refreshUserProfile()
+    } else {
+        Timber.d("DashboardScreen: Profile update flag is false, skipping refresh")
+    }
+}
+
+/**
+ * Home Header Component with Dynamic Sizing
+ * Adapts to different screen sizes for optimal readability
+ */
+data class HomeUiState(
+    val userProfile: UserProfile?
+)
+
+@Composable
+fun HomeHeader(uiState: HomeUiState) {
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
+
+    // 1. Dynamic Sizing Logic
+    val titleSize = when {
+        screenWidth < 360.dp -> 22.sp // Small devices (very tight)
+        screenWidth < 400.dp -> 24.sp // Standard small/medium phones
+        else -> 28.sp                 // Large phones (Pixel 7 Pro, S23 Ultra)
+    }
+    
+    val subtitleSize = if (screenWidth < 360.dp) 14.sp else 16.sp
+
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        // Greeting
+        Text(
+            text = "Hey there, ${uiState.userProfile?.firstName ?: "there"}",
+            style = TextStyle(
+                fontSize = subtitleSize,
+                fontWeight = FontWeight.Medium,
+                color = Color.Gray,
+                letterSpacing = 0.5.sp // Adds slight breathability
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis // Prevents name from breaking layout
+        )
+
+        Spacer(Modifier.height(4.dp)) // Slightly reduced for tighter cohesion
+
+        // Headline
+        Text(
+            text = "Schedule your next booking",
+            style = TextStyle(
+                fontSize = titleSize,
+                fontWeight = FontWeight.Bold,
+                color = LimoOrange,
+                // 2. Critical: Set LineHeight to handle wrapping gracefully
+                lineHeight = titleSize * 1.3f 
+            )
         )
     }
 }

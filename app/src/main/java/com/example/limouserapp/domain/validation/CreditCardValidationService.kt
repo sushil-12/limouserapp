@@ -124,10 +124,13 @@ class CreditCardValidationService @Inject constructor() {
     fun getCardType(cardNumber: String): CardType {
         val cleanNumber = cardNumber.replace(" ", "").replace("-", "")
         
+        // Return UNKNOWN if card number is too short to determine type
+        if (cleanNumber.isEmpty()) return CardType.UNKNOWN
+        
         return when {
             cleanNumber.startsWith("4") -> CardType.VISA
-            cleanNumber.startsWith("5") && cleanNumber[1] in '1'..'5' -> CardType.MASTERCARD
-            cleanNumber.startsWith("34") || cleanNumber.startsWith("37") -> CardType.AMERICAN_EXPRESS
+            cleanNumber.startsWith("5") && cleanNumber.length > 1 && cleanNumber[1] in '1'..'5' -> CardType.MASTERCARD
+            cleanNumber.length >= 2 && (cleanNumber.startsWith("34") || cleanNumber.startsWith("37")) -> CardType.AMERICAN_EXPRESS
             cleanNumber.startsWith("6") -> CardType.DISCOVER
             else -> CardType.UNKNOWN
         }

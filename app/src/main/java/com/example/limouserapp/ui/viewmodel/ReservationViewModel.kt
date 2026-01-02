@@ -22,6 +22,127 @@ import javax.inject.Inject
 import android.util.Log
 import com.example.limouserapp.ui.utils.DebugTags
 import com.google.gson.GsonBuilder
+import com.example.limouserapp.ui.booking.comprehensivebooking.ExtraStop
+
+/**
+ * Service type enum to replace hardcoded strings
+ */
+enum class ServiceType(val value: String, val displayName: String) {
+    ONE_WAY("one_way", "One Way"),
+    ROUND_TRIP("round_trip", "Round Trip"),
+    CHARTER_TOUR("charter_tour", "Charter Tour");
+
+    companion object {
+        fun fromValue(value: String): ServiceType {
+            return entries.find { it.value == value } ?: ONE_WAY
+        }
+
+        fun fromDisplayName(displayName: String): ServiceType {
+            return entries.find { it.displayName == displayName } ?: ONE_WAY
+        }
+    }
+}
+
+/**
+ * Transfer type enum to replace hardcoded strings
+ */
+enum class TransferType(val pickupType: String, val dropoffType: String, val displayName: String) {
+    CITY_TO_CITY("city", "city", "City to City"),
+    CITY_TO_AIRPORT("city", "airport", "City to Airport"),
+    AIRPORT_TO_CITY("airport", "city", "Airport to City"),
+    AIRPORT_TO_AIRPORT("airport", "airport", "Airport to Airport"),
+    CITY_TO_CRUISE_PORT("city", "cruise", "City to Cruise Port"),
+    AIRPORT_TO_CRUISE_PORT("airport", "cruise", "Airport to Cruise Port"),
+    CRUISE_PORT_TO_CITY("cruise", "city", "Cruise Port to City"),
+    CRUISE_PORT_TO_AIRPORT("cruise", "airport", "Cruise Port to Airport"),
+    CRUISE_PORT_TO_CRUISE_PORT("cruise", "cruise", "Cruise Port to Cruise Port");
+
+    companion object {
+        fun fromTypes(pickupType: String, dropoffType: String): TransferType {
+            // Normalize types - handle "cruise port" -> "cruise"
+            val normalizedPickup = pickupType.lowercase().replace("cruise port", "cruise").replace("cruise_port", "cruise").trim()
+            val normalizedDropoff = dropoffType.lowercase().replace("cruise port", "cruise").replace("cruise_port", "cruise").trim()
+            return entries.find { it.pickupType == normalizedPickup && it.dropoffType == normalizedDropoff } ?: CITY_TO_CITY
+        }
+
+        fun fromDisplayName(displayName: String): TransferType {
+            return entries.find { it.displayName == displayName } ?: CITY_TO_CITY
+        }
+    }
+}
+
+/**
+ * UI state holder for booking screen - replaces local state management
+ */
+data class BookingUiState(
+    val rideData: RideData = RideData(
+        serviceType = "one_way",
+        bookingHour = "2 hours minimum",
+        pickupType = "city",
+        dropoffType = "city",
+        pickupDate = "",
+        pickupTime = "",
+        pickupLocation = "",
+        destinationLocation = "",
+        selectedPickupAirport = "",
+        selectedDestinationAirport = "",
+        noOfPassenger = 1,
+        noOfLuggage = 0,
+        noOfVehicles = 1,
+        pickupLat = null,
+        pickupLong = null,
+        destinationLat = null,
+        destinationLong = null
+    ),
+    val vehicle: Vehicle? = null,
+    val pickupDate: String = "",
+    val pickupTime: String = "",
+    val serviceType: ServiceType = ServiceType.ONE_WAY,
+    val transferType: TransferType = TransferType.CITY_TO_CITY,
+    val pickupLocation: String = "",
+    val dropoffLocation: String = "",
+    val passengerCount: String = "1",
+    val luggageCount: String = "0",
+    val extraStops: List<ExtraStop> = emptyList(),
+    val profileData: com.example.limouserapp.data.model.dashboard.ProfileData? = null,
+    val isLoading: Boolean = false,
+    val validationErrors: List<String> = emptyList(),
+    // Address validation errors (for Directions API validation)
+    val addressValidationErrors: Map<String, String> = emptyMap(), // Key: "pickup_location" or "dropoff_location", Value: error message
+    // Passenger information fields (editable, matches web app)
+    val passengerName: String = "",
+    val passengerEmail: String = "",
+    val passengerMobile: String = "",
+    // Cruise fields (for validation)
+    val cruisePort: String = "",
+    val cruiseShipName: String = "",
+    val shipArrivalTime: String = "",
+    val dropoffCruisePort: String = "",
+    val dropoffCruiseShipName: String = "",
+    val dropoffShipArrivalTime: String = "",
+    // Return trip fields (for validation when service type is round trip)
+    val returnPickupDate: String = "",
+    val returnPickupTime: String = "",
+    val returnPickupLocation: String = "",
+    val returnDropoffLocation: String = "",
+    val returnPickupLat: Double? = null,
+    val returnPickupLong: Double? = null,
+    val returnDropoffLat: Double? = null,
+    val returnDropoffLong: Double? = null,
+    val returnTransferType: TransferType? = null,
+    val returnPickupAirport: String = "",
+    val returnDropoffAirport: String = "",
+    val returnPickupAirline: String = "",
+    val returnDropoffAirline: String = "",
+    val returnPickupFlightNumber: String = "",
+    val returnOriginAirportCity: String = "",
+    val returnCruisePort: String = "",
+    val returnCruiseShipName: String = "",
+    val returnShipArrivalTime: String = ""
+) {
+    val isFormValid: Boolean
+        get() = validationErrors.isEmpty()
+}
 
 @HiltViewModel
 class ReservationViewModel @Inject constructor(
@@ -65,6 +186,10 @@ class ReservationViewModel @Inject constructor(
     private val _updateResult = MutableStateFlow<Result<EditReservationUpdateResponse>?>(null)
     val updateResult: StateFlow<Result<EditReservationUpdateResponse>?> = _updateResult
 
+    // UI State for comprehensive booking screen - unidirectional data flow
+    private val _uiState = MutableStateFlow(BookingUiState())
+    val uiState: StateFlow<BookingUiState> = _uiState
+
     /**
      * Fetch booking rates - matches iOS fetchBookingRates()
      * Should be called when:
@@ -80,6 +205,13 @@ class ReservationViewModel @Inject constructor(
      * @param editBookingId Booking ID if in edit mode
      * @param hasExtraStops Whether there are extra stops (defaults to false)
      */
+    // Track last API call to prevent duplicate calls
+    private var lastFetchBookingRatesCall: Long = 0
+    private val DEBOUNCE_DELAY_MS = 300L // 300ms debounce delay
+    
+    // Track the serviceType of the currently loading call to detect changes
+    private var currentLoadingServiceType: String? = null
+    
     fun fetchBookingRates(
         ride: RideData, 
         vehicle: Vehicle,
@@ -87,20 +219,129 @@ class ReservationViewModel @Inject constructor(
         editBookingId: Int? = null,
         hasExtraStops: Boolean = false,
         extraStops: List<com.example.limouserapp.data.model.booking.ExtraStopRequest> = emptyList(),
-        returnExtraStops: List<com.example.limouserapp.data.model.booking.ExtraStopRequest> = emptyList()
+        returnExtraStops: List<com.example.limouserapp.data.model.booking.ExtraStopRequest> = emptyList(),
+        returnPickupLat: Double? = null,
+        returnPickupLong: Double? = null,
+        returnDropoffLat: Double? = null,
+        returnDropoffLong: Double? = null
     ) {
         viewModelScope.launch {
+            // ==========================================
+            // ENHANCED LOGGING: Trace serviceType at entry
+            // ==========================================
+            Log.d(DebugTags.BookingProcess, "===========================================")
+            Log.d(DebugTags.BookingProcess, "🚀 fetchBookingRates CALLED - ENTRY POINT")
+            Log.d(DebugTags.BookingProcess, "===========================================")
+            Log.d(DebugTags.BookingProcess, "📥 PARAMETER ride.serviceType='${ride.serviceType}'")
+            Log.d(DebugTags.BookingProcess, "📥 PARAMETER ride.bookingHour='${ride.bookingHour}'")
+            Log.d(DebugTags.BookingProcess, "📥 PARAMETER ride.pickupLocation='${ride.pickupLocation}'")
+            Log.d(DebugTags.BookingProcess, "📥 PARAMETER ride.pickupTime='${ride.pickupTime}'")
+            Log.d(DebugTags.BookingProcess, "===========================================")
+            
+            // Determine the serviceType for this call
+            val incomingServiceType = if (ride.serviceType in listOf("one_way", "round_trip", "charter_tour")) {
+                ride.serviceType
+            } else {
+                ReservationRequestBuilder.mapServiceType(ride.serviceType)
+            }
+            
+            // CRITICAL FIX: Check if already loading, but allow override if serviceType changed
+            if (_bookingRatesLoading.value) {
+                val currentLoadingType = currentLoadingServiceType
+                if (currentLoadingType != null && currentLoadingType == incomingServiceType) {
+                    // Same serviceType is already loading - skip this call
+                    Log.d(DebugTags.BookingProcess, "⏭️ Skipping fetchBookingRates call - already loading")
+                    Log.d(DebugTags.BookingProcess, "⚠️ WARNING: ServiceType='${ride.serviceType}' was passed but call was skipped (already loading same serviceType='$currentLoadingType')!")
+                    return@launch
+                } else {
+                    // Different serviceType - this is important! Allow override
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    Log.d(DebugTags.BookingProcess, "🔄 SERVICE TYPE CHANGED - OVERRIDING PREVIOUS CALL")
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    Log.d(DebugTags.BookingProcess, "⚠️ Previous call serviceType: '$currentLoadingType'")
+                    Log.d(DebugTags.BookingProcess, "⚠️ New call serviceType: '$incomingServiceType'")
+                    Log.d(DebugTags.BookingProcess, "✅ Allowing new call to proceed (serviceType changed)")
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    // Continue - we'll override the previous call
+                }
+            }
+            
+            // Debounce: Skip if called within DEBOUNCE_DELAY_MS (but only if same serviceType)
+            val currentTime = System.currentTimeMillis()
+            val timeSinceLastCall = currentTime - lastFetchBookingRatesCall
+            if (timeSinceLastCall < DEBOUNCE_DELAY_MS && currentLoadingServiceType == incomingServiceType) {
+                Log.d(DebugTags.BookingProcess, "===========================================")
+                Log.d(DebugTags.BookingProcess, "⏭️ CALL DEBOUNCED - SKIPPING")
+                Log.d(DebugTags.BookingProcess, "===========================================")
+                Log.d(DebugTags.BookingProcess, "⚠️ WARNING: ServiceType='${ride.serviceType}' was passed but call was debounced!")
+                Log.d(DebugTags.BookingProcess, "⚠️ Time since last call: ${timeSinceLastCall}ms (debounce threshold: ${DEBOUNCE_DELAY_MS}ms)")
+                Log.d(DebugTags.BookingProcess, "⚠️ This call with serviceType='${ride.serviceType}' is being skipped!")
+                Log.d(DebugTags.BookingProcess, "===========================================")
+                return@launch
+            }
+            lastFetchBookingRatesCall = currentTime
+            Log.d(DebugTags.BookingProcess, "✅ Call NOT debounced - proceeding with serviceType='${ride.serviceType}'")
+            
+            // Update tracking
+            currentLoadingServiceType = incomingServiceType
+            
             _bookingRatesLoading.value = true
             Log.d(DebugTags.BookingProcess, "===========================================")
             Log.d(DebugTags.BookingProcess, "🔄 FETCHING BOOKING RATES")
             Log.d(DebugTags.BookingProcess, "===========================================")
             Log.d(DebugTags.BookingProcess, "Edit Mode: $isEditMode")
-            Log.d(DebugTags.BookingProcess, "Ride Data: serviceType=${ride.serviceType}, pickup=${ride.pickupLocation}")
+            Log.d(DebugTags.BookingProcess, "Ride Data: serviceType=${ride.serviceType}, pickup=${ride.pickupLocation}, bookingHour=${ride.bookingHour}, pickupTime=${ride.pickupTime}")
             Log.d(DebugTags.BookingProcess, "Vehicle ID: ${vehicle.id}, Name: ${vehicle.name}")
             
             try {
+                // ==========================================
+                // ENHANCED LOGGING: Trace serviceType mapping
+                // ==========================================
+                Log.d(DebugTags.BookingProcess, "===========================================")
+                Log.d(DebugTags.BookingProcess, "🔍 SERVICE TYPE MAPPING SECTION")
+                Log.d(DebugTags.BookingProcess, "===========================================")
+                Log.d(DebugTags.BookingProcess, "📥 INPUT: ride.serviceType='${ride.serviceType}'")
+                Log.d(DebugTags.BookingProcess, "📥 INPUT: ride.bookingHour='${ride.bookingHour}'")
+                
                 // Map service type and transfer type
-                val serviceType = ReservationRequestBuilder.mapServiceType(ride.serviceType)
+                // CRITICAL: Use ride.serviceType directly (it's already mapped in updatedRideData)
+                // Log the service type to debug why it might be wrong
+                Log.d(DebugTags.BookingProcess, "🔍 Mapping service type - ride.serviceType='${ride.serviceType}', ride.bookingHour='${ride.bookingHour}'")
+                
+                // CRITICAL: Don't remap if it's already correctly set - use ride.serviceType directly
+                // Only map if it's in a different format (e.g., "oneway" -> "one_way")
+                val serviceType = if (ride.serviceType in listOf("one_way", "round_trip", "charter_tour")) {
+                    // Already in correct format, use directly
+                    Log.d(DebugTags.BookingProcess, "✅ Service type already in correct format, using directly: '${ride.serviceType}'")
+                    ride.serviceType
+                } else {
+                    // Need to map from other format
+                    val mapped = ReservationRequestBuilder.mapServiceType(ride.serviceType)
+                    Log.d(DebugTags.BookingProcess, "🔄 Mapped service type - input='${ride.serviceType}' -> output='$mapped'")
+                    mapped
+                }
+                
+                Log.d(DebugTags.BookingProcess, "📤 OUTPUT: Final service type for request: '$serviceType'")
+                Log.d(DebugTags.BookingProcess, "===========================================")
+                
+                // CRITICAL: If serviceType is still "one_way" but ride.serviceType was "charter_tour", log error
+                if (ride.serviceType == "charter_tour" && serviceType != "charter_tour") {
+                    Log.e(DebugTags.BookingProcess, "===========================================")
+                    Log.e(DebugTags.BookingProcess, "❌ CRITICAL ERROR: Service type mapping failed!")
+                    Log.e(DebugTags.BookingProcess, "❌ ride.serviceType='${ride.serviceType}' but mapped serviceType='$serviceType'")
+                    Log.e(DebugTags.BookingProcess, "❌ Expected: 'charter_tour', Got: '$serviceType'")
+                    Log.e(DebugTags.BookingProcess, "===========================================")
+                }
+                
+                // CRITICAL: If ride.serviceType is "charter_tour" but serviceType is "one_way", log error
+                if (ride.serviceType == "charter_tour" && serviceType == "one_way") {
+                    Log.e(DebugTags.BookingProcess, "===========================================")
+                    Log.e(DebugTags.BookingProcess, "❌ CRITICAL ERROR: Service type was 'charter_tour' but became 'one_way'!")
+                    Log.e(DebugTags.BookingProcess, "❌ ride.serviceType='${ride.serviceType}'")
+                    Log.e(DebugTags.BookingProcess, "❌ serviceType variable='$serviceType'")
+                    Log.e(DebugTags.BookingProcess, "❌ This should NEVER happen!")
+                    Log.e(DebugTags.BookingProcess, "===========================================")
+                }
                 val transferType = ReservationRequestBuilder.mapTransferType(ride.pickupType, ride.dropoffType)
                 
                 // iOS Logic: In edit mode, check if we need to recalculate rates
@@ -138,6 +379,9 @@ class ReservationViewModel @Inject constructor(
                     
                     // ALWAYS recalculate distance before hitting API (matches iOS line 2398)
                     Log.d(DebugTags.BookingProcess, "📏 RECALCULATING DISTANCE BEFORE API CALL...")
+                    Log.d(DebugTags.BookingProcess, "📍 RIDE COORDINATES CHECK:")
+                    Log.d(DebugTags.BookingProcess, "   Pickup: Lat=${ride.pickupLat}, Long=${ride.pickupLong}, Location=${ride.pickupLocation}")
+                    Log.d(DebugTags.BookingProcess, "   Dropoff: Lat=${ride.destinationLat}, Long=${ride.destinationLong}, Location=${ride.destinationLocation}")
                     
                     // Extract waypoints from extra stops (matches iOS calculateDistanceWithExtraStops)
                     val waypoints = extraStops
@@ -145,8 +389,11 @@ class ReservationViewModel @Inject constructor(
                         .map { Pair(it.latitude!!, it.longitude!!) }
                         .takeIf { it.isNotEmpty() }
                     
+                    Log.d(DebugTags.BookingProcess, "📍 Waypoints: ${waypoints?.size ?: 0} stops")
+                    
                     val (distance, duration) = if (ride.pickupLat != null && ride.pickupLong != null && 
                         ride.destinationLat != null && ride.destinationLong != null) {
+                        Log.d(DebugTags.BookingProcess, "✅ Coordinates available - calculating distance...")
                         val result = directionsService.calculateDistance(
                             ride.pickupLat, ride.pickupLong, 
                             ride.destinationLat, ride.destinationLong,
@@ -157,6 +404,8 @@ class ReservationViewModel @Inject constructor(
                         result
                     } else {
                         Log.w(DebugTags.BookingProcess, "⚠️ Missing coordinates - cannot calculate distance")
+                        Log.w(DebugTags.BookingProcess, "   Pickup Lat: ${ride.pickupLat}, Long: ${ride.pickupLong}")
+                        Log.w(DebugTags.BookingProcess, "   Dropoff Lat: ${ride.destinationLat}, Long: ${ride.destinationLong}")
                         Pair(0, 0)
                     }
                     
@@ -167,19 +416,29 @@ class ReservationViewModel @Inject constructor(
                         .map { Pair(it.latitude!!, it.longitude!!) }
                         .takeIf { it.isNotEmpty() }
                     
+                    // Use return trip coordinates if provided, otherwise fall back to reversed outbound coordinates
+                    val returnPickupLatToUse = returnPickupLat ?: ride.destinationLat
+                    val returnPickupLongToUse = returnPickupLong ?: ride.destinationLong
+                    val returnDropoffLatToUse = returnDropoffLat ?: ride.pickupLat
+                    val returnDropoffLongToUse = returnDropoffLong ?: ride.pickupLong
+                    
                     val (returnDistance, returnDuration) = if (serviceType == "round_trip" && 
-                        ride.destinationLat != null && ride.destinationLong != null &&
-                        ride.pickupLat != null && ride.pickupLong != null) {
+                        returnPickupLatToUse != null && returnPickupLongToUse != null &&
+                        returnDropoffLatToUse != null && returnDropoffLongToUse != null) {
                         Log.d(DebugTags.BookingProcess, "🔄 RECALCULATING RETURN DISTANCE AS WELL")
+                        Log.d(DebugTags.BookingProcess, "📍 Return Pickup: Lat=$returnPickupLatToUse, Long=$returnPickupLongToUse")
+                        Log.d(DebugTags.BookingProcess, "📍 Return Dropoff: Lat=$returnDropoffLatToUse, Long=$returnDropoffLongToUse")
+                        Log.d(DebugTags.BookingProcess, "📍 Return Waypoints: ${returnWaypoints?.size ?: 0}")
                         val result = directionsService.calculateDistance(
-                            ride.destinationLat, ride.destinationLong,
-                            ride.pickupLat, ride.pickupLong,
+                            returnPickupLatToUse, returnPickupLongToUse,
+                            returnDropoffLatToUse, returnDropoffLongToUse,
                             returnWaypoints
                         )
                         Log.d(DebugTags.BookingProcess, "📏 RECALCULATED RETURN DISTANCE: ${result.first} meters (with ${returnWaypoints?.size ?: 0} waypoints)")
                         Log.d(DebugTags.BookingProcess, "⏱️ RECALCULATED RETURN DURATION: ${result.second} seconds")
                         result
                     } else {
+                        Log.w(DebugTags.BookingProcess, "⚠️ Cannot calculate return distance - missing coordinates")
                         Pair(0, 0)
                     }
                     
@@ -189,7 +448,63 @@ class ReservationViewModel @Inject constructor(
                     }
                     
                     // Build booking rates request
-                    val numberOfHours = ride.bookingHour ?: "0"
+                    // CRITICAL: Clean up noOfHours - remove " hours minimum" and " hours" suffixes for charter tour
+                    // Also handle the case where bookingHour might still have " hours minimum" suffix
+                    val numberOfHours = if (serviceType == "charter_tour" && ride.bookingHour != null) {
+                        val cleaned = ride.bookingHour.replace(" hours minimum", "").replace(" hours", "").trim()
+                        if (cleaned.isEmpty()) "0" else cleaned
+                    } else if (serviceType != "charter_tour" && ride.bookingHour != null && ride.bookingHour.contains("hours")) {
+                        // For non-charter tours, if bookingHour has "hours", use default "0"
+                        "0"
+                    } else {
+                        ride.bookingHour ?: "0"
+                    }
+                    
+                    // CRITICAL: Log pickupTime before formatting to debug empty values
+                    Log.d(DebugTags.BookingProcess, "🔍 Building BookingRatesRequest - ride.serviceType='${ride.serviceType}', mapped serviceType='$serviceType', ride.bookingHour='${ride.bookingHour}', cleaned numberOfHours='$numberOfHours'")
+                    Log.d(DebugTags.BookingProcess, "🔍 Building BookingRatesRequest - ride.pickupTime='${ride.pickupTime}', ride.returnPickupTime='${ride.returnPickupTime}'")
+                    
+                    // CRITICAL: Use ride.pickupTime directly - if empty, log warning but don't fail
+                    val formattedPickupTime = if (ride.pickupTime.isNotEmpty()) {
+                        ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime)
+                    } else {
+                        Log.w(DebugTags.BookingProcess, "⚠️ WARNING: ride.pickupTime is empty! Using empty string.")
+                        ""
+                    }
+                    
+                    val formattedReturnPickupTime = if (serviceType == "round_trip" && !ride.returnPickupTime.isNullOrEmpty()) {
+                        ReservationRequestBuilder.formatTimeForAPI(ride.returnPickupTime)
+                    } else if (ride.pickupTime.isNotEmpty()) {
+                        ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime) // Fallback to pickup time if return time not set
+                    } else {
+                        Log.w(DebugTags.BookingProcess, "⚠️ WARNING: ride.pickupTime is empty for returnPickupTime fallback! Using empty string.")
+                        ""
+                    }
+                    
+                    Log.d(DebugTags.BookingProcess, "🔍 Formatted times - pickupTime='$formattedPickupTime', returnPickupTime='$formattedReturnPickupTime'")
+                    
+                    // ==========================================
+                    // ENHANCED LOGGING: Trace serviceType before creating request
+                    // ==========================================
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    Log.d(DebugTags.BookingProcess, "🏗️ CREATING BookingRatesRequest")
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    Log.d(DebugTags.BookingProcess, "📥 ride.serviceType='${ride.serviceType}'")
+                    Log.d(DebugTags.BookingProcess, "📥 serviceType variable='$serviceType'")
+                    Log.d(DebugTags.BookingProcess, "📥 numberOfHours='$numberOfHours'")
+                    Log.d(DebugTags.BookingProcess, "📥 ride.bookingHour='${ride.bookingHour}'")
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    
+                    // CRITICAL: Verify serviceType is correct before creating request
+                    if (ride.serviceType == "charter_tour" && serviceType != "charter_tour") {
+                        Log.e(DebugTags.BookingProcess, "===========================================")
+                        Log.e(DebugTags.BookingProcess, "❌ CRITICAL ERROR BEFORE CREATING REQUEST!")
+                        Log.e(DebugTags.BookingProcess, "❌ ride.serviceType='${ride.serviceType}'")
+                        Log.e(DebugTags.BookingProcess, "❌ serviceType variable='$serviceType'")
+                        Log.e(DebugTags.BookingProcess, "❌ Expected: 'charter_tour', Got: '$serviceType'")
+                        Log.e(DebugTags.BookingProcess, "===========================================")
+                    }
+                    
                     val bookingRatesRequest = BookingRatesRequest(
                         vehicleId = vehicle.id,
                         transferType = transferType,
@@ -201,14 +516,62 @@ class ReservationViewModel @Inject constructor(
                         isMasterVehicle = vehicle.isMasterVehicle ?: false,
                         extraStops = extraStops,
                         returnExtraStops = returnExtraStops,
-                        pickupTime = ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime),
-                        returnPickupTime = ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime),
+                        pickupTime = formattedPickupTime,
+                        returnPickupTime = formattedReturnPickupTime,
                         returnVehicleId = vehicle.id,
                         returnAffiliateType = "affiliate"
                     )
                     
-                    Log.d(DebugTags.BookingProcess, "📍 Extra Stops: ${extraStops.size}")
-                    Log.d(DebugTags.BookingProcess, "📍 Return Extra Stops: ${returnExtraStops.size}")
+                    // ==========================================
+                    // ENHANCED LOGGING: Verify serviceType in created request
+                    // ==========================================
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    Log.d(DebugTags.BookingProcess, "✅ BookingRatesRequest CREATED")
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    Log.d(DebugTags.BookingProcess, "📤 bookingRatesRequest.serviceType='${bookingRatesRequest.serviceType}'")
+                    Log.d(DebugTags.BookingProcess, "📤 bookingRatesRequest.noOfHours='${bookingRatesRequest.noOfHours}'")
+                    Log.d(DebugTags.BookingProcess, "📤 bookingRatesRequest.pickupTime='${bookingRatesRequest.pickupTime}'")
+                    Log.d(DebugTags.BookingProcess, "📤 bookingRatesRequest.transferType='${bookingRatesRequest.transferType}'")
+                    
+                    // CRITICAL: Verify the request has correct serviceType
+                    if (ride.serviceType == "charter_tour" && bookingRatesRequest.serviceType != "charter_tour") {
+                        Log.e(DebugTags.BookingProcess, "===========================================")
+                        Log.e(DebugTags.BookingProcess, "❌ CRITICAL ERROR IN CREATED REQUEST!")
+                        Log.e(DebugTags.BookingProcess, "❌ ride.serviceType='${ride.serviceType}'")
+                        Log.e(DebugTags.BookingProcess, "❌ serviceType variable='$serviceType'")
+                        Log.e(DebugTags.BookingProcess, "❌ bookingRatesRequest.serviceType='${bookingRatesRequest.serviceType}'")
+                        Log.e(DebugTags.BookingProcess, "❌ Expected: 'charter_tour', Got: '${bookingRatesRequest.serviceType}'")
+                        Log.e(DebugTags.BookingProcess, "===========================================")
+                    }
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    Log.d(DebugTags.BookingProcess, "📦 BOOKING RATES REQUEST PAYLOAD:")
+                    Log.d(DebugTags.BookingProcess, "📦 BOOKING RATES REQUEST PAYLOAD:")
+
+                    Log.d(DebugTags.BookingProcess, "===========================================")
+                    Log.d(DebugTags.BookingProcess, "vehicleId: ${vehicle.id}")
+                    Log.d(DebugTags.BookingProcess, "transferType: $transferType")
+                    Log.d(DebugTags.BookingProcess, "serviceType: $serviceType")
+                    Log.d(DebugTags.BookingProcess, "numberOfVehicles: ${ride.noOfVehicles}")
+                    Log.d(DebugTags.BookingProcess, "distance: $distance meters (${distance / 1609.34} miles)")
+                    Log.d(DebugTags.BookingProcess, "returnDistance: $returnDistance meters (${returnDistance / 1609.34} miles)")
+                    Log.d(DebugTags.BookingProcess, "noOfHours: $numberOfHours")
+                    Log.d(DebugTags.BookingProcess, "isMasterVehicle: ${vehicle.isMasterVehicle ?: false}")
+                    Log.d(DebugTags.BookingProcess, "extraStops: ${extraStops.size} stops")
+                    extraStops.forEachIndexed { index, stop ->
+                        Log.d(DebugTags.BookingProcess, "  Stop ${index + 1}: ${stop.address}, Lat=${stop.latitude}, Long=${stop.longitude}")
+                    }
+                    Log.d(DebugTags.BookingProcess, "returnExtraStops: ${returnExtraStops.size} stops")
+                    returnExtraStops.forEachIndexed { index, stop ->
+                        Log.d(DebugTags.BookingProcess, "  Return Stop ${index + 1}: ${stop.address}, Lat=${stop.latitude}, Long=${stop.longitude}")
+                    }
+                    // Use the already-formatted times from above
+                    Log.d(DebugTags.BookingProcess, "pickupTime: $formattedPickupTime")
+                    Log.d(DebugTags.BookingProcess, "returnPickupTime: $formattedReturnPickupTime")
+                    Log.d(DebugTags.BookingProcess, "returnVehicleId: ${vehicle.id}")
+                    Log.d(DebugTags.BookingProcess, "returnAffiliateType: affiliate")
+                    Log.d(DebugTags.BookingProcess, "===========================================")
                     
                     Log.d(DebugTags.BookingProcess, "🚀 CALLING BOOKING RATES API WITH DISTANCE: $distance meters")
                     Log.d(DebugTags.BookingProcess, "🚀 CALLING BOOKING RATES API WITH RETURN DISTANCE: $returnDistance meters")
@@ -242,6 +605,7 @@ class ReservationViewModel @Inject constructor(
                 _bookingRatesData.value = null
             } finally {
                 _bookingRatesLoading.value = false
+                currentLoadingServiceType = null // Clear tracking when done
             }
         }
     }
@@ -344,7 +708,11 @@ class ReservationViewModel @Inject constructor(
                         extraStops = emptyList(),
                         returnExtraStops = emptyList(),
                         pickupTime = ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime),
-                        returnPickupTime = ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime),
+                        returnPickupTime = if (serviceType == "round_trip" && !ride.returnPickupTime.isNullOrEmpty()) {
+                            ReservationRequestBuilder.formatTimeForAPI(ride.returnPickupTime)
+                        } else {
+                            ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime) // Fallback to pickup time if return time not set
+                        },
                         returnVehicleId = vehicle.id,
                         returnAffiliateType = "affiliate"
                     )
@@ -482,13 +850,24 @@ class ReservationViewModel @Inject constructor(
                     ""
                 }
                 val pickupAirportName = if (isPickupAirport) (ride.selectedPickupAirport ?: "") else ""
-                val pickupAirportLat = if (isPickupAirport && pickupAirportOption != null) {
-                    pickupAirportOption.lat.toString()
+                // Use airport coordinates from AirportOption if available, otherwise fall back to ride coordinates (matches iOS)
+                val pickupAirportLat = if (isPickupAirport) {
+                    if (pickupAirportOption != null && pickupAirportOption.lat != 0.0) {
+                        pickupAirportOption.lat.toString()
+                    } else {
+                        // Fall back to ride coordinates when airport option is null or has 0.0 coordinates
+                        ride.pickupLat?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
-                val pickupAirportLng = if (isPickupAirport && pickupAirportOption != null) {
-                    pickupAirportOption.long.toString()
+                val pickupAirportLng = if (isPickupAirport) {
+                    if (pickupAirportOption != null && pickupAirportOption.long != 0.0) {
+                        pickupAirportOption.long.toString()
+                    } else {
+                        // Fall back to ride coordinates when airport option is null or has 0.0 coordinates
+                        ride.pickupLong?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
@@ -499,13 +878,24 @@ class ReservationViewModel @Inject constructor(
                     ""
                 }
                 val dropoffAirportName = if (isDropoffAirport) (ride.selectedDestinationAirport ?: "") else ""
-                val dropoffAirportLat = if (isDropoffAirport && dropoffAirportOption != null) {
-                    dropoffAirportOption.lat.toString()
+                // Use airport coordinates from AirportOption if available, otherwise fall back to ride coordinates (matches iOS)
+                val dropoffAirportLat = if (isDropoffAirport) {
+                    if (dropoffAirportOption != null && dropoffAirportOption.lat != 0.0) {
+                        dropoffAirportOption.lat.toString()
+                    } else {
+                        // Fall back to ride coordinates when airport option is null or has 0.0 coordinates
+                        ride.destinationLat?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
-                val dropoffAirportLng = if (isDropoffAirport && dropoffAirportOption != null) {
-                    dropoffAirportOption.long.toString()
+                val dropoffAirportLng = if (isDropoffAirport) {
+                    if (dropoffAirportOption != null && dropoffAirportOption.long != 0.0) {
+                        dropoffAirportOption.long.toString()
+                    } else {
+                        // Fall back to ride coordinates when airport option is null or has 0.0 coordinates
+                        ride.destinationLong?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
@@ -527,13 +917,24 @@ class ReservationViewModel @Inject constructor(
                     ""
                 }
                 val returnPickupAirportName = if (isRoundTrip && isReturnPickupAirport) dropoffAirportName else ""
-                val returnPickupAirportLat = if (isRoundTrip && isReturnPickupAirport && returnPickupAirportOption != null) {
-                    returnPickupAirportOption.lat.toString()
+                // Use airport coordinates from AirportOption if available, otherwise fall back to ride coordinates (matches iOS)
+                val returnPickupAirportLat = if (isRoundTrip && isReturnPickupAirport) {
+                    if (returnPickupAirportOption != null && returnPickupAirportOption.lat != 0.0) {
+                        returnPickupAirportOption.lat.toString()
+                    } else {
+                        // Fall back to ride coordinates (return pickup = outbound dropoff)
+                        ride.destinationLat?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
-                val returnPickupAirportLng = if (isRoundTrip && isReturnPickupAirport && returnPickupAirportOption != null) {
-                    returnPickupAirportOption.long.toString()
+                val returnPickupAirportLng = if (isRoundTrip && isReturnPickupAirport) {
+                    if (returnPickupAirportOption != null && returnPickupAirportOption.long != 0.0) {
+                        returnPickupAirportOption.long.toString()
+                    } else {
+                        // Fall back to ride coordinates (return pickup = outbound dropoff)
+                        ride.destinationLong?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
@@ -546,24 +947,47 @@ class ReservationViewModel @Inject constructor(
                     ""
                 }
                 val returnDropoffAirportName = if (isRoundTrip && isReturnDropoffAirport) pickupAirportName else ""
-                val returnDropoffAirportLat = if (isRoundTrip && isReturnDropoffAirport && returnDropoffAirportOption != null) {
-                    returnDropoffAirportOption.lat.toString()
+                // Use airport coordinates from AirportOption if available, otherwise fall back to ride coordinates (matches iOS)
+                val returnDropoffAirportLat = if (isRoundTrip && isReturnDropoffAirport) {
+                    if (returnDropoffAirportOption != null && returnDropoffAirportOption.lat != 0.0) {
+                        returnDropoffAirportOption.lat.toString()
+                    } else {
+                        // Fall back to ride coordinates (return dropoff = outbound pickup)
+                        ride.pickupLat?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
-                val returnDropoffAirportLng = if (isRoundTrip && isReturnDropoffAirport && returnDropoffAirportOption != null) {
-                    returnDropoffAirportOption.long.toString()
+                val returnDropoffAirportLng = if (isRoundTrip && isReturnDropoffAirport) {
+                    if (returnDropoffAirportOption != null && returnDropoffAirportOption.long != 0.0) {
+                        returnDropoffAirportOption.long.toString()
+                    } else {
+                        // Fall back to ride coordinates (return dropoff = outbound pickup)
+                        ride.pickupLong?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
                 
-                // Return trip locations (reversed from outbound)
-                val returnPickupLocation = if (isRoundTrip) ride.destinationLocation else ""
-                val returnPickupLat = if (isRoundTrip) (ride.destinationLat?.toString() ?: "") else ""
-                val returnPickupLng = if (isRoundTrip) (ride.destinationLong?.toString() ?: "") else ""
-                val returnDropoffLocation = if (isRoundTrip) ride.pickupLocation else ""
-                val returnDropoffLat = if (isRoundTrip) (ride.pickupLat?.toString() ?: "") else ""
-                val returnDropoffLng = if (isRoundTrip) (ride.pickupLong?.toString() ?: "") else ""
+                // Return trip locations (reversed from outbound) - set based on whether they're airports (matches web app)
+                val returnPickupLocation = if (isRoundTrip) {
+                    if (isReturnPickupAirport) "" else (ride.destinationLocation ?: "")
+                } else ""
+                val returnPickupLat = if (isRoundTrip) {
+                    if (isReturnPickupAirport) "" else (ride.destinationLat?.toString() ?: "")
+                } else ""
+                val returnPickupLng = if (isRoundTrip) {
+                    if (isReturnPickupAirport) "" else (ride.destinationLong?.toString() ?: "")
+                } else ""
+                val returnDropoffLocation = if (isRoundTrip) {
+                    if (isReturnDropoffAirport) "" else (ride.pickupLocation ?: "")
+                } else ""
+                val returnDropoffLat = if (isRoundTrip) {
+                    if (isReturnDropoffAirport) "" else (ride.pickupLat?.toString() ?: "")
+                } else ""
+                val returnDropoffLng = if (isRoundTrip) {
+                    if (isReturnDropoffAirport) "" else (ride.pickupLong?.toString() ?: "")
+                } else ""
                 
                 // Return trip date/time (use pickup date as fallback for round trips)
                 val returnPickupDate = if (isRoundTrip) ride.pickupDate else ""
@@ -581,9 +1005,9 @@ class ReservationViewModel @Inject constructor(
                     numberOfHours = numberOfHours.toIntOrNull() ?: 0,
                     accountType = "individual",
                     changeIndividualData = false,
-                    passengerName = profileData?.fullName ?: "Guest",
-                    passengerEmail = profileData?.email ?: "",
-                    passengerCell = profileData?.mobile ?: "",
+                    passengerName = if (_uiState.value.passengerName.isNotEmpty()) _uiState.value.passengerName else (profileData?.fullName ?: "Guest"),
+                    passengerEmail = if (_uiState.value.passengerEmail.isNotEmpty()) _uiState.value.passengerEmail else (profileData?.email ?: ""),
+                    passengerCell = if (_uiState.value.passengerMobile.isNotEmpty()) _uiState.value.passengerMobile else (profileData?.mobile ?: ""),
                     passengerCellIsd = profileData?.mobileIsd ?: "+1",
                     passengerCellCountry = profileData?.mobileCountry ?: "us",
                     totalPassengers = ride.noOfPassenger,
@@ -627,9 +1051,10 @@ class ReservationViewModel @Inject constructor(
                     pickupTime = ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime),
                     extraStops = extraStops,
                     returnExtraStops = returnExtraStops,
-                    pickup = ride.pickupLocation,
-                    pickupLatitude = ride.pickupLat?.toString() ?: "",
-                    pickupLongitude = ride.pickupLong?.toString() ?: "",
+                    // Pickup fields - set based on whether it's an airport (matches web app)
+                    pickup = if (isPickupAirport) "" else (ride.pickupLocation ?: ""),
+                    pickupLatitude = if (isPickupAirport) "" else (ride.pickupLat?.toString() ?: ""),
+                    pickupLongitude = if (isPickupAirport) "" else (ride.pickupLong?.toString() ?: ""),
                     pickupAirportOption = pickupAirportOption,
                     pickupAirport = pickupAirportId,
                     pickupAirportName = pickupAirportName,
@@ -645,9 +1070,10 @@ class ReservationViewModel @Inject constructor(
                     cruisePort = cruisePort,
                     cruiseName = cruiseName,
                     cruiseTime = cruiseTime,
-                    dropoff = ride.destinationLocation,
-                    dropoffLatitude = ride.destinationLat?.toString() ?: "",
-                    dropoffLongitude = ride.destinationLong?.toString() ?: "",
+                    // Dropoff fields - set based on whether it's an airport (matches web app)
+                    dropoff = if (isDropoffAirport) "" else (ride.destinationLocation ?: ""),
+                    dropoffLatitude = if (isDropoffAirport) "" else (ride.destinationLat?.toString() ?: ""),
+                    dropoffLongitude = if (isDropoffAirport) "" else (ride.destinationLong?.toString() ?: ""),
                     dropoffAirportOption = dropoffAirportOption,
                     dropoffAirport = dropoffAirportId,
                     dropoffAirportName = dropoffAirportName,
@@ -930,7 +1356,11 @@ class ReservationViewModel @Inject constructor(
                         extraStops = emptyList(),
                         returnExtraStops = emptyList(),
                         pickupTime = ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime),
-                        returnPickupTime = ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime),
+                        returnPickupTime = if (serviceType == "round_trip" && !ride.returnPickupTime.isNullOrEmpty()) {
+                            ReservationRequestBuilder.formatTimeForAPI(ride.returnPickupTime)
+                        } else {
+                            ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime) // Fallback to pickup time if return time not set
+                        },
                         returnVehicleId = vehicle.id,
                         returnAffiliateType = "affiliate"
                     )
@@ -1022,13 +1452,24 @@ class ReservationViewModel @Inject constructor(
                     ""
                 }
                 val pickupAirportName = if (isPickupAirport) (ride.selectedPickupAirport ?: "") else ""
-                val pickupAirportLat = if (isPickupAirport && pickupAirportOption != null) {
-                    pickupAirportOption.lat.toString()
+                // Use airport coordinates from AirportOption if available, otherwise fall back to ride coordinates (matches iOS)
+                val pickupAirportLat = if (isPickupAirport) {
+                    if (pickupAirportOption != null && pickupAirportOption.lat != 0.0) {
+                        pickupAirportOption.lat.toString()
+                    } else {
+                        // Fall back to ride coordinates when airport option is null or has 0.0 coordinates
+                        ride.pickupLat?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
-                val pickupAirportLng = if (isPickupAirport && pickupAirportOption != null) {
-                    pickupAirportOption.long.toString()
+                val pickupAirportLng = if (isPickupAirport) {
+                    if (pickupAirportOption != null && pickupAirportOption.long != 0.0) {
+                        pickupAirportOption.long.toString()
+                    } else {
+                        // Fall back to ride coordinates when airport option is null or has 0.0 coordinates
+                        ride.pickupLong?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
@@ -1039,13 +1480,24 @@ class ReservationViewModel @Inject constructor(
                     ""
                 }
                 val dropoffAirportName = if (isDropoffAirport) (ride.selectedDestinationAirport ?: "") else ""
-                val dropoffAirportLat = if (isDropoffAirport && dropoffAirportOption != null) {
-                    dropoffAirportOption.lat.toString()
+                // Use airport coordinates from AirportOption if available, otherwise fall back to ride coordinates (matches iOS)
+                val dropoffAirportLat = if (isDropoffAirport) {
+                    if (dropoffAirportOption != null && dropoffAirportOption.lat != 0.0) {
+                        dropoffAirportOption.lat.toString()
+                    } else {
+                        // Fall back to ride coordinates when airport option is null or has 0.0 coordinates
+                        ride.destinationLat?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
-                val dropoffAirportLng = if (isDropoffAirport && dropoffAirportOption != null) {
-                    dropoffAirportOption.long.toString()
+                val dropoffAirportLng = if (isDropoffAirport) {
+                    if (dropoffAirportOption != null && dropoffAirportOption.long != 0.0) {
+                        dropoffAirportOption.long.toString()
+                    } else {
+                        // Fall back to ride coordinates when airport option is null or has 0.0 coordinates
+                        ride.destinationLong?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
@@ -1066,13 +1518,24 @@ class ReservationViewModel @Inject constructor(
                     ""
                 }
                 val returnPickupAirportName = if (isRoundTrip && isReturnPickupAirport) dropoffAirportName else ""
-                val returnPickupAirportLat = if (isRoundTrip && isReturnPickupAirport && returnPickupAirportOption != null) {
-                    returnPickupAirportOption.lat.toString()
+                // Use airport coordinates from AirportOption if available, otherwise fall back to ride coordinates (matches iOS)
+                val returnPickupAirportLat = if (isRoundTrip && isReturnPickupAirport) {
+                    if (returnPickupAirportOption != null && returnPickupAirportOption.lat != 0.0) {
+                        returnPickupAirportOption.lat.toString()
+                    } else {
+                        // Fall back to ride coordinates (return pickup = outbound dropoff)
+                        ride.destinationLat?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
-                val returnPickupAirportLng = if (isRoundTrip && isReturnPickupAirport && returnPickupAirportOption != null) {
-                    returnPickupAirportOption.long.toString()
+                val returnPickupAirportLng = if (isRoundTrip && isReturnPickupAirport) {
+                    if (returnPickupAirportOption != null && returnPickupAirportOption.long != 0.0) {
+                        returnPickupAirportOption.long.toString()
+                    } else {
+                        // Fall back to ride coordinates (return pickup = outbound dropoff)
+                        ride.destinationLong?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
@@ -1084,24 +1547,47 @@ class ReservationViewModel @Inject constructor(
                     ""
                 }
                 val returnDropoffAirportName = if (isRoundTrip && isReturnDropoffAirport) pickupAirportName else ""
-                val returnDropoffAirportLat = if (isRoundTrip && isReturnDropoffAirport && returnDropoffAirportOption != null) {
-                    returnDropoffAirportOption.lat.toString()
+                // Use airport coordinates from AirportOption if available, otherwise fall back to ride coordinates (matches iOS)
+                val returnDropoffAirportLat = if (isRoundTrip && isReturnDropoffAirport) {
+                    if (returnDropoffAirportOption != null && returnDropoffAirportOption.lat != 0.0) {
+                        returnDropoffAirportOption.lat.toString()
+                    } else {
+                        // Fall back to ride coordinates (return dropoff = outbound pickup)
+                        ride.pickupLat?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
-                val returnDropoffAirportLng = if (isRoundTrip && isReturnDropoffAirport && returnDropoffAirportOption != null) {
-                    returnDropoffAirportOption.long.toString()
+                val returnDropoffAirportLng = if (isRoundTrip && isReturnDropoffAirport) {
+                    if (returnDropoffAirportOption != null && returnDropoffAirportOption.long != 0.0) {
+                        returnDropoffAirportOption.long.toString()
+                    } else {
+                        // Fall back to ride coordinates (return dropoff = outbound pickup)
+                        ride.pickupLong?.toString() ?: ""
+                    }
                 } else {
                     ""
                 }
                 
-                // Return trip locations
-                val returnPickupLocation = if (isRoundTrip) ride.destinationLocation else ""
-                val returnPickupLat = if (isRoundTrip) (ride.destinationLat?.toString() ?: "") else ""
-                val returnPickupLng = if (isRoundTrip) (ride.destinationLong?.toString() ?: "") else ""
-                val returnDropoffLocation = if (isRoundTrip) ride.pickupLocation else ""
-                val returnDropoffLat = if (isRoundTrip) (ride.pickupLat?.toString() ?: "") else ""
-                val returnDropoffLng = if (isRoundTrip) (ride.pickupLong?.toString() ?: "") else ""
+                // Return trip locations (reversed from outbound) - set based on whether they're airports (matches web app)
+                val returnPickupLocation = if (isRoundTrip) {
+                    if (isReturnPickupAirport) "" else (ride.destinationLocation ?: "")
+                } else ""
+                val returnPickupLat = if (isRoundTrip) {
+                    if (isReturnPickupAirport) "" else (ride.destinationLat?.toString() ?: "")
+                } else ""
+                val returnPickupLng = if (isRoundTrip) {
+                    if (isReturnPickupAirport) "" else (ride.destinationLong?.toString() ?: "")
+                } else ""
+                val returnDropoffLocation = if (isRoundTrip) {
+                    if (isReturnDropoffAirport) "" else (ride.pickupLocation ?: "")
+                } else ""
+                val returnDropoffLat = if (isRoundTrip) {
+                    if (isReturnDropoffAirport) "" else (ride.pickupLat?.toString() ?: "")
+                } else ""
+                val returnDropoffLng = if (isRoundTrip) {
+                    if (isReturnDropoffAirport) "" else (ride.pickupLong?.toString() ?: "")
+                } else ""
                 
                 // Return trip date/time
                 val returnPickupDate = if (isRoundTrip) ride.pickupDate else ""
@@ -1119,9 +1605,9 @@ class ReservationViewModel @Inject constructor(
                     numberOfHours = numberOfHours,
                     accountType = "individual",
                     changeIndividualData = "false",
-                    passengerName = profileData?.fullName ?: "Guest",
-                    passengerEmail = profileData?.email ?: "",
-                    passengerCell = profileData?.mobile ?: "",
+                    passengerName = if (_uiState.value.passengerName.isNotEmpty()) _uiState.value.passengerName else (profileData?.fullName ?: "Guest"),
+                    passengerEmail = if (_uiState.value.passengerEmail.isNotEmpty()) _uiState.value.passengerEmail else (profileData?.email ?: ""),
+                    passengerCell = if (_uiState.value.passengerMobile.isNotEmpty()) _uiState.value.passengerMobile else (profileData?.mobile ?: ""),
                     passengerCellIsd = profileData?.mobileIsd ?: "+1",
                     passengerCellCountry = profileData?.mobileCountry ?: "us",
                     totalPassengers = ride.noOfPassenger.toString(),
@@ -1165,9 +1651,10 @@ class ReservationViewModel @Inject constructor(
                     pickupTime = ReservationRequestBuilder.formatTimeForAPI(ride.pickupTime),
                     extraStops = extraStops,
                     returnExtraStops = returnExtraStops,
-                    pickup = ride.pickupLocation,
-                    pickupLatitude = ride.pickupLat?.toString() ?: "",
-                    pickupLongitude = ride.pickupLong?.toString() ?: "",
+                    // Pickup fields - set based on whether it's an airport (matches web app)
+                    pickup = if (isPickupAirport) "" else (ride.pickupLocation ?: ""),
+                    pickupLatitude = if (isPickupAirport) "" else (ride.pickupLat?.toString() ?: ""),
+                    pickupLongitude = if (isPickupAirport) "" else (ride.pickupLong?.toString() ?: ""),
                     pickupAirportOption = pickupAirportOption,
                     pickupAirport = pickupAirportId,
                     pickupAirportName = pickupAirportName,
@@ -1181,9 +1668,10 @@ class ReservationViewModel @Inject constructor(
                     cruisePort = cruisePort,
                     cruiseName = cruiseName,
                     cruiseTime = cruiseTime,
-                    dropoff = ride.destinationLocation,
-                    dropoffLatitude = ride.destinationLat?.toString() ?: "",
-                    dropoffLongitude = ride.destinationLong?.toString() ?: "",
+                    // Dropoff fields - set based on whether it's an airport (matches web app)
+                    dropoff = if (isDropoffAirport) "" else (ride.destinationLocation ?: ""),
+                    dropoffLatitude = if (isDropoffAirport) "" else (ride.destinationLat?.toString() ?: ""),
+                    dropoffLongitude = if (isDropoffAirport) "" else (ride.destinationLong?.toString() ?: ""),
                     dropoffAirportOption = dropoffAirportOption,
                     dropoffAirport = dropoffAirportId,
                     dropoffAirportName = dropoffAirportName,
@@ -1328,74 +1816,944 @@ class ReservationViewModel @Inject constructor(
         bookingHour: String,
         minRateInvolved: Boolean = false
     ): Pair<Double, Double> {
-        var totalBaserate = 0.0
-        var allInclusiveBaserate = 0.0
-        
-        // Get hours multiplier for charter tours
-        // If min_rate_involved is true, don't multiply by hours (use base rate as-is)
-        // iOS checks for "Charter Tour" (with space) but serviceType passed is "charter_tour" (mapped)
-        // Check for both to handle the mapped value
-        val hoursMultiplier = if ((serviceType == "Charter Tour" || serviceType.lowercase() == "charter_tour") && !minRateInvolved) {
-            bookingHour.toIntOrNull() ?: 1
-        } else {
-            1
-        }
-        
-        Log.d(DebugTags.BookingProcess, "📊 PROCESSING ALL_INCLUSIVE_RATES - Total items: ${rateArray.allInclusiveRates.size}")
-        Log.d(DebugTags.BookingProcess, "Min Rate Involved: $minRateInvolved, Hours Multiplier: $hoursMultiplier")
-        
-        // Sum all baserate values from ALL items in all_inclusive_rates
-        for ((key, rateItem) in rateArray.allInclusiveRates) {
-            // iOS checks for "Charter Tour" (with space) but serviceType passed is "charter_tour" (mapped)
-            // Check for both to handle the mapped value
-            // If min_rate_involved is true, don't multiply by hours
-            val adjustedBaserate = if ((serviceType == "Charter Tour" || serviceType.lowercase() == "charter_tour") && key == "Base_Rate" && !minRateInvolved) {
-                rateItem.baserate * hoursMultiplier
+
+        var subtotal = 0.0
+
+        // ---------- HOURS MULTIPLIER ----------
+        val hoursMultiplier =
+            if (serviceType.lowercase() == "charter_tour" && !minRateInvolved) {
+                bookingHour.toIntOrNull() ?: 1
             } else {
-                rateItem.baserate
+                1
             }
-            totalBaserate += adjustedBaserate
-            allInclusiveBaserate += adjustedBaserate
-            Log.d(DebugTags.BookingProcess, "  ✓ $key: baserate=${rateItem.baserate}, adjusted=$adjustedBaserate")
+
+        // ---------- BASE RATE (RAW) ----------
+        val baseRateRaw = rateArray.allInclusiveRates["Base_Rate"]?.baserate ?: 0.0
+        val baseRateWithHours =
+            if (serviceType.lowercase() == "charter_tour" && !minRateInvolved) {
+                baseRateRaw * hoursMultiplier
+            } else {
+                baseRateRaw
+            }
+
+        // ---------- ADD STOPS / WAIT / ELH ----------
+        val stops = rateArray.allInclusiveRates["Stops"]?.baserate ?: 0.0
+        val wait = rateArray.allInclusiveRates["Wait"]?.baserate ?: 0.0
+        val elh = rateArray.allInclusiveRates["ELH_Charges  "]?.baserate ?: 0.0
+
+        Log.d(DebugTags.BookingProcess, "SUSHIL LOGS")
+        Log.d(DebugTags.BookingProcess, "stops, ${stops}")
+        Log.d(DebugTags.BookingProcess, "stops, ${rateArray.toString()}")
+
+        var baseForAdmin = baseRateWithHours + stops + wait + elh
+        Log.d(DebugTags.BookingProcess, "SUSHIL LOGS")
+        Log.d(DebugTags.BookingProcess, "BASE RATE ADMIN, ${baseForAdmin}")
+
+        // ---------- ADD AMENITIES TO BASE ----------
+        for (rateItem in rateArray.amenities.values) {
+            baseForAdmin += rateItem.baserate
+        }
+
+        // ---------- ADMIN SHARE (WEB LOGIC) ----------
+        val adminSharePercent = 25.0
+        val adminShare =
+            if (minRateInvolved) 0.0 else (baseForAdmin * adminSharePercent / 100)
+
+        Log.d(DebugTags.BookingProcess, "BASE RATE ADMIN SHARE, ${adminShare}")
+
+        val baseAfterAdmin = baseForAdmin + adminShare
+
+        // ---------- ADD BASE TO SUBTOTAL ----------
+        subtotal += baseAfterAdmin
+
+        // ---------- TAXES ----------
+        for (taxItem in rateArray.taxes.values) {
+            val taxAmount =
+                if (taxItem.type == "percent") {
+                    (taxItem.baserate / 100) * baseAfterAdmin
+                } else {
+                    taxItem.baserate
+                }
+            subtotal += taxAmount
+        }
+
+        // ---------- MISC ----------
+        for (rateItem in rateArray.misc.values) {
+            subtotal += rateItem.baserate
+        }
+
+        subtotal = subtotal.roundToTwo()
+        val grandTotal = (subtotal * numberOfVehicles).roundToTwo()
+
+        Log.d(DebugTags.BookingProcess, "✅ WEB-MATCHED CALCULATION")
+        Log.d(DebugTags.BookingProcess, "Base After Admin: $baseAfterAdmin")
+        Log.d(DebugTags.BookingProcess, "Subtotal: $subtotal")
+        Log.d(DebugTags.BookingProcess, "Grand Total: $grandTotal")
+
+        return Pair(subtotal, grandTotal)
+    }
+
+    /* ---------- Helper ---------- */
+    private fun Double.roundToTwo(): Double =
+        kotlin.math.round(this * 100) / 100
+
+
+    // UI State Management Functions - Initial setters for unidirectional data flow
+
+    /**
+     * Validates the current UI state and returns a list of validation error keys
+     * Ported from ComprehensiveBookingScreen.validateRequiredFields()
+     */
+    private fun validateState(): List<String> {
+        val errors = mutableListOf<String>()
+        val currentState = _uiState.value
+
+        Log.d(DebugTags.BookingProcess, "🔍 Starting form validation...")
+
+        // Service type and transfer type validation
+        // Note: ONE_WAY and CITY_TO_CITY are valid default values if explicitly selected by user
+        // Only validate if they're truly unset (which shouldn't happen in normal flow)
+        // The UI ensures these are always set, so we don't need to validate them here
+
+        if (currentState.pickupDate.isEmpty() || currentState.pickupTime.isEmpty()) {
+            errors.add("pickup_datetime")
+        }
+
+        // Determine if pickup/dropoff are airports based on transfer type
+        val transferType = currentState.transferType.name.lowercase()
+        val isPickupAirport = transferType.contains("airport", ignoreCase = true) && 
+                             (transferType.startsWith("airport", ignoreCase = true) || 
+                              transferType == "airport_to_airport")
+        val isDropoffAirport = transferType.contains("airport", ignoreCase = true) && 
+                               (transferType.endsWith("airport", ignoreCase = true) || 
+                                transferType == "airport_to_airport")
+        
+        // Location validation - check based on transfer type
+        if (!isPickupAirport && currentState.pickupLocation.isEmpty()) {
+            errors.add("pickup_location")
+        }
+        if (!isDropoffAirport && currentState.dropoffLocation.isEmpty()) {
+            errors.add("dropoff_location")
+        }
+        if (isPickupAirport && currentState.rideData.selectedPickupAirport.isEmpty()) {
+            errors.add("pickup_airport")
+        }
+        if (isDropoffAirport && currentState.rideData.selectedDestinationAirport.isEmpty()) {
+            errors.add("dropoff_airport")
+        }
+        if (isDropoffAirport && currentState.rideData.selectedDestinationAirport.isEmpty()) {
+            errors.add("dropoff_airport")
+        }
+
+        // Coordinate validation - only required when location is NOT an airport
+        if (!isPickupAirport && (currentState.rideData.pickupLat == null || currentState.rideData.pickupLong == null)) {
+            errors.add("pickup_coordinates")
+        }
+
+        if (!isDropoffAirport && (currentState.rideData.destinationLat == null || currentState.rideData.destinationLong == null)) {
+            errors.add("dropoff_coordinates")
+        }
+
+        // Passenger information validation (matches web app - checks editable fields)
+        val passengerName = currentState.passengerName.trim()
+        val passengerEmail = currentState.passengerEmail.trim()
+        val passengerMobile = currentState.passengerMobile.trim()
+
+        if (passengerName.isEmpty()) {
+            errors.add("passenger_name")
+        }
+
+        if (passengerEmail.isEmpty() || !android.util.Patterns.EMAIL_ADDRESS.matcher(passengerEmail).matches()) {
+            errors.add("passenger_email")
+        }
+
+        if (passengerMobile.isEmpty() || passengerMobile.length < 4) {
+            errors.add("passenger_mobile")
+        }
+
+        // Transfer type specific validations (matches web app)
+        val transferTypeDisplay = currentState.transferType.displayName.lowercase()
+        when {
+            // Airport pickup validation - airline AND flight are required (matches web app line 2012, 2014)
+            transferTypeDisplay.startsWith("airport") -> {
+                if (currentState.rideData.selectedPickupAirport.isNullOrEmpty()) {
+                    errors.add("pickup_airport")
+                }
+                // Check if pickup airline is selected (matches web app - pickup_airline_option is required)
+                if (currentState.rideData.selectedPickupAirline.isNullOrEmpty()) {
+                    errors.add("pickup_airline")
+                }
+                // Flight number is required for pickup airport (matches web app line 2012)
+                if (currentState.rideData.pickupFlightNumber.isNullOrEmpty()) {
+                    errors.add("pickup_flight_number")
+                }
+                if (currentState.rideData.originAirportCity.isNullOrEmpty()) {
+                    errors.add("origin_airport_city")
+                }
+            }
+            // Cruise pickup validation - cruise port and cruise ship name are required
+            transferTypeDisplay.startsWith("cruise") -> {
+                if (currentState.cruisePort.isNullOrEmpty()) {
+                    errors.add("cruise_pickup_port")
+                }
+                if (currentState.cruiseShipName.isNullOrEmpty()) {
+                    errors.add("cruise_pickup_ship")
+                }
+            }
+        }
+
+        when {
+            // Airport dropoff validation - airline is required, flight is NOT required (matches web app line 1995)
+            transferTypeDisplay.endsWith("airport") -> {
+                if (currentState.rideData.selectedDestinationAirport.isNullOrEmpty()) {
+                    errors.add("dropoff_airport")
+                }
+                // Check if dropoff airline is selected (matches web app - dropoff_airline_option is required)
+                if (currentState.rideData.selectedDestinationAirline.isNullOrEmpty()) {
+                    errors.add("dropoff_airline")
+                }
+                // Flight number is NOT required for dropoff airport (matches web app - line 1993 is commented out)
+            }
+            // Cruise dropoff validation - cruise port and cruise ship name are required
+            transferTypeDisplay.endsWith("cruise") -> {
+                if (currentState.dropoffCruisePort.isNullOrEmpty()) {
+                    errors.add("cruise_dropoff_port")
+                }
+                if (currentState.dropoffCruiseShipName.isNullOrEmpty()) {
+                    errors.add("cruise_dropoff_ship")
+                }
+            }
+        }
+
+        // Charter tour validation
+        if (currentState.serviceType == ServiceType.CHARTER_TOUR) {
+            if (currentState.rideData.bookingHour.isEmpty()) {
+                errors.add("charter_hours")
+            }
+        }
+
+        // Return trip validation (for round trips)
+        if (currentState.serviceType == ServiceType.ROUND_TRIP) {
+            // Return pickup date and time validation
+            if (currentState.returnPickupDate.isEmpty() || currentState.returnPickupTime.isEmpty()) {
+                errors.add("return_pickup_datetime")
+            }
+
+            // Determine return transfer type for validation
+            val returnTransferTypeDisplay = currentState.returnTransferType?.displayName?.lowercase() ?: ""
+            val isReturnPickupAirport = returnTransferTypeDisplay.contains("airport", ignoreCase = true) && 
+                                       (returnTransferTypeDisplay.startsWith("airport", ignoreCase = true) || 
+                                        returnTransferTypeDisplay == "airport_to_airport")
+            val isReturnDropoffAirport = returnTransferTypeDisplay.contains("airport", ignoreCase = true) && 
+                                        (returnTransferTypeDisplay.endsWith("airport", ignoreCase = true) || 
+                                         returnTransferTypeDisplay == "airport_to_airport")
+            
+            // Return location validation
+            if (!isReturnPickupAirport && currentState.returnPickupLocation.isEmpty()) {
+                errors.add("return_pickup_location")
+            }
+            if (!isReturnDropoffAirport && currentState.returnDropoffLocation.isEmpty()) {
+                errors.add("return_dropoff_location")
+            }
+            
+            // Return coordinate validation
+            if (!isReturnPickupAirport && (currentState.returnPickupLat == null || currentState.returnPickupLong == null)) {
+                errors.add("return_pickup_coordinates")
+            }
+            if (!isReturnDropoffAirport && (currentState.returnDropoffLat == null || currentState.returnDropoffLong == null)) {
+                errors.add("return_dropoff_coordinates")
+            }
+            
+            // Return airport validation
+            if (isReturnPickupAirport && currentState.returnPickupAirport.isEmpty()) {
+                errors.add("return_pickup_airport")
+            }
+            if (isReturnDropoffAirport && currentState.returnDropoffAirport.isEmpty()) {
+                errors.add("return_dropoff_airport")
+            }
+            
+            // Return transfer type specific validations
+            when {
+                // Return airport pickup validation
+                returnTransferTypeDisplay.startsWith("airport") -> {
+                    if (currentState.returnPickupAirport.isEmpty()) {
+                        errors.add("return_pickup_airport")
+                    }
+                    if (currentState.returnPickupAirline.isEmpty()) {
+                        errors.add("return_pickup_airline")
+                    }
+                    if (currentState.returnPickupFlightNumber.isEmpty()) {
+                        errors.add("return_pickup_flight_number")
+                    }
+                    if (currentState.returnOriginAirportCity.isEmpty()) {
+                        errors.add("return_origin_airport_city")
+                    }
+                }
+                // Return cruise pickup validation
+                returnTransferTypeDisplay.startsWith("cruise") -> {
+                    if (currentState.returnCruisePort.isEmpty()) {
+                        errors.add("return_cruise_pickup_port")
+                    }
+                    if (currentState.returnCruiseShipName.isEmpty()) {
+                        errors.add("return_cruise_pickup_ship")
+                    }
+                }
+            }
+            
+            when {
+                // Return airport dropoff validation
+                returnTransferTypeDisplay.endsWith("airport") -> {
+                    if (currentState.returnDropoffAirport.isEmpty()) {
+                        errors.add("return_dropoff_airport")
+                    }
+                    if (currentState.returnDropoffAirline.isEmpty()) {
+                        errors.add("return_dropoff_airline")
+                    }
+                    // Flight number is NOT required for return dropoff airport
+                }
+                // Return cruise dropoff validation
+                returnTransferTypeDisplay.endsWith("cruise") -> {
+                    if (currentState.returnCruisePort.isEmpty()) {
+                        errors.add("return_cruise_dropoff_port")
+                    }
+                    if (currentState.returnCruiseShipName.isEmpty()) {
+                        errors.add("return_cruise_dropoff_ship")
+                    }
+                }
+            }
+        }
+
+        Log.d(DebugTags.BookingProcess, if (errors.isEmpty()) "✅✅✅ All validation checks passed!" else "❌ Validation failed with ${errors.size} errors: $errors")
+        return errors
+    }
+
+    /**
+     * Updates validation errors in the state
+     * Public method to allow manual validation trigger before submission (matches web app pattern)
+     */
+    fun updateValidationErrors() {
+        val errors = validateState()
+        _uiState.value = _uiState.value.copy(validationErrors = errors)
+    }
+    
+    /**
+     * Validate route between pickup and dropoff addresses using Directions API
+     * Adds validation errors if route is not possible
+     */
+    private suspend fun validateAddressRoute(
+        pickupLat: Double,
+        pickupLong: Double,
+        dropoffLat: Double,
+        dropoffLong: Double
+    ) {
+        val (isValid, errorMessage) = directionsService.validateRoute(
+            pickupLat = pickupLat,
+            pickupLong = pickupLong,
+            dropoffLat = dropoffLat,
+            dropoffLong = dropoffLong
+        )
+        
+        if (!isValid && errorMessage != null) {
+            Log.w(DebugTags.BookingProcess, "❌ Address validation failed: $errorMessage")
+            // Add validation errors for both pickup and dropoff locations
+            val currentErrors = _uiState.value.addressValidationErrors.toMutableMap()
+            currentErrors["pickup_location"] = errorMessage
+            currentErrors["dropoff_location"] = errorMessage
+            _uiState.value = _uiState.value.copy(addressValidationErrors = currentErrors)
+            
+            // Also add to validation errors list
+            val currentValidationErrors = _uiState.value.validationErrors.toMutableList()
+            if (!currentValidationErrors.contains("pickup_location")) {
+                currentValidationErrors.add("pickup_location")
+            }
+            if (!currentValidationErrors.contains("dropoff_location")) {
+                currentValidationErrors.add("dropoff_location")
+            }
+            _uiState.value = _uiState.value.copy(validationErrors = currentValidationErrors)
+        } else {
+            // Clear validation errors if route is valid
+            val currentErrors = _uiState.value.addressValidationErrors.toMutableMap()
+            currentErrors.remove("pickup_location")
+            currentErrors.remove("dropoff_location")
+            _uiState.value = _uiState.value.copy(addressValidationErrors = currentErrors)
+            
+            // Remove from validation errors list
+            val currentValidationErrors = _uiState.value.validationErrors.toMutableList()
+            currentValidationErrors.remove("pickup_location")
+            currentValidationErrors.remove("dropoff_location")
+            _uiState.value = _uiState.value.copy(validationErrors = currentValidationErrors)
+        }
+    }
+
+    /**
+     * Clear specific validation errors when user starts typing in a field
+     * This provides immediate feedback that the user is fixing the error
+     */
+    fun clearValidationErrors(vararg errorKeys: String) {
+        val currentErrors = _uiState.value.validationErrors.toMutableList()
+        currentErrors.removeAll(errorKeys.toSet())
+        _uiState.value = _uiState.value.copy(validationErrors = currentErrors)
+    }
+
+    /**
+     * Update service type - ensures both flat field and rideData are kept in sync
+     */
+    fun setServiceType(type: ServiceType) {
+        // Clear validation errors immediately when user changes service type
+        clearValidationErrors("service_type")
+        _uiState.value = _uiState.value.copy(
+            serviceType = type,
+            rideData = _uiState.value.rideData.copy(serviceType = type.value)
+        )
+        // Re-validate after service type change (affects validation rules)
+        updateValidationErrors()
+    }
+
+    /**
+     * Update pickup location with address and coordinates - ensures both flat field and rideData are kept in sync
+     * If coordinates are not provided, preserves existing coordinates (prevents clearing coordinates during typing)
+     */
+    fun setPickupLocation(address: String, lat: Double? = null, long: Double? = null) {
+        // Clear validation errors immediately when user changes pickup location
+        clearValidationErrors("pickup_location", "pickup_coordinates", "locations")
+        val currentRideData = _uiState.value.rideData
+        // Preserve existing coordinates if new ones are not provided (prevents clearing during typing)
+        val finalLat = lat ?: currentRideData.pickupLat
+        val finalLong = long ?: currentRideData.pickupLong
+        
+        _uiState.value = _uiState.value.copy(
+            pickupLocation = address,
+            rideData = currentRideData.copy(
+                pickupLocation = address,
+                pickupLat = finalLat,
+                pickupLong = finalLong
+            ),
+            // Clear address validation error when location changes
+            addressValidationErrors = _uiState.value.addressValidationErrors.filterKeys { it != "pickup_location" }
+        )
+        
+        // Validate route if both pickup and dropoff coordinates are available
+        if (finalLat != null && finalLong != null && 
+            currentRideData.destinationLat != null && currentRideData.destinationLong != null) {
+            viewModelScope.launch {
+                validateAddressRoute(
+                    pickupLat = finalLat,
+                    pickupLong = finalLong,
+                    dropoffLat = currentRideData.destinationLat!!,
+                    dropoffLong = currentRideData.destinationLong!!
+                )
+            }
         }
         
-        Log.d(DebugTags.BookingProcess, "📦 PROCESSING AMENITIES - Total items: ${rateArray.amenities.size}")
-        for ((key, rateItem) in rateArray.amenities) {
-            totalBaserate += rateItem.baserate
-            Log.d(DebugTags.BookingProcess, "  ✓ $key: ${rateItem.baserate}")
+        // Re-validate after coordinate update
+        updateValidationErrors()
+    }
+
+    /**
+     * Update dropoff location with address and coordinates - ensures both flat field and rideData are kept in sync
+     * If coordinates are not provided, preserves existing coordinates (prevents clearing coordinates during typing)
+     */
+    fun setDropoffLocation(address: String, lat: Double? = null, long: Double? = null) {
+        // Clear validation errors immediately when user changes dropoff location
+        clearValidationErrors("dropoff_location", "dropoff_coordinates", "locations")
+        val currentRideData = _uiState.value.rideData
+        // Preserve existing coordinates if new ones are not provided (prevents clearing during typing)
+        val finalLat = lat ?: currentRideData.destinationLat
+        val finalLong = long ?: currentRideData.destinationLong
+        
+        _uiState.value = _uiState.value.copy(
+            dropoffLocation = address,
+            rideData = currentRideData.copy(
+                destinationLocation = address,
+                destinationLat = finalLat,
+                destinationLong = finalLong
+            ),
+            // Clear address validation error when location changes
+            addressValidationErrors = _uiState.value.addressValidationErrors.filterKeys { it != "dropoff_location" }
+        )
+        
+        // Validate route if both pickup and dropoff coordinates are available
+        if (finalLat != null && finalLong != null && 
+            currentRideData.pickupLat != null && currentRideData.pickupLong != null) {
+            viewModelScope.launch {
+                validateAddressRoute(
+                    pickupLat = currentRideData.pickupLat!!,
+                    pickupLong = currentRideData.pickupLong!!,
+                    dropoffLat = finalLat,
+                    dropoffLong = finalLong
+                )
+            }
         }
         
-        Log.d(DebugTags.BookingProcess, "💰 PROCESSING TAXES - Total items: ${rateArray.taxes.size}")
-        for ((key, taxItem) in rateArray.taxes) {
-            // Use amount instead of baserate for taxes (amount is the actual tax value)
-            totalBaserate += taxItem.amount
-            Log.d(DebugTags.BookingProcess, "  ✓ $key: baserate=${taxItem.baserate}, amount=${taxItem.amount}, using amount=${taxItem.amount}")
+        // Re-validate after coordinate update
+        updateValidationErrors()
+    }
+
+    /**
+     * Update pickup date - ensures both flat field and rideData are kept in sync
+     */
+    fun setPickupDate(date: String) {
+        // Clear validation errors immediately when user changes pickup date
+        clearValidationErrors("pickup_datetime")
+        _uiState.value = _uiState.value.copy(
+            pickupDate = date,
+            rideData = _uiState.value.rideData.copy(pickupDate = date)
+        )
+        // Re-validate after date change
+        updateValidationErrors()
+    }
+
+    /**
+     * Update passenger count - ensures both flat field and rideData are kept in sync
+     */
+    fun setPassengerCount(count: Int) {
+        val countString = count.toString()
+        _uiState.value = _uiState.value.copy(
+            passengerCount = countString,
+            rideData = _uiState.value.rideData.copy(noOfPassenger = count)
+        )
+    }
+
+    /**
+     * Update transfer type - ensures both flat field and rideData are kept in sync
+     */
+    fun setTransferType(type: TransferType) {
+        // Clear validation errors immediately when user changes transfer type
+        clearValidationErrors("transfer_type", "pickup_airport", "dropoff_airport", "pickup_airline", "dropoff_airline", "pickup_flight_number", "origin_airport_city", "cruise_pickup_port", "cruise_pickup_ship", "cruise_dropoff_port", "cruise_dropoff_ship")
+        _uiState.value = _uiState.value.copy(
+            transferType = type,
+            rideData = _uiState.value.rideData.copy(
+                pickupType = type.pickupType,
+                dropoffType = type.dropoffType
+            )
+        )
+        // Re-validate after transfer type change (affects validation rules)
+        updateValidationErrors()
+    }
+
+    /**
+     * Update booking hours for charter tours - ensures both flat field and rideData are kept in sync
+     */
+    fun setHours(hours: Int) {
+        // Clear validation errors immediately when user changes hours
+        clearValidationErrors("charter_hours")
+        val hoursString = hours.toString()
+        _uiState.value = _uiState.value.copy(
+            rideData = _uiState.value.rideData.copy(bookingHour = hoursString)
+        )
+        // Re-validate after hours change
+        updateValidationErrors()
+    }
+
+    /**
+     * Update number of vehicles - ensures both flat field and rideData are kept in sync
+     */
+    fun setNumberOfVehicles(count: String) {
+        val countInt = count.toIntOrNull() ?: 1
+        _uiState.value = _uiState.value.copy(
+            rideData = _uiState.value.rideData.copy(noOfVehicles = countInt)
+        )
+    }
+
+    /**
+     * Update luggage count - ensures both flat field and rideData are kept in sync
+     */
+    fun setLuggageCount(count: Int) {
+        val countString = count.toString()
+        _uiState.value = _uiState.value.copy(
+            luggageCount = countString,
+            rideData = _uiState.value.rideData.copy(noOfLuggage = count)
+        )
+    }
+
+    /**
+     * Update pickup time - ensures both flat field and rideData are kept in sync
+     */
+    fun setPickupTime(time: String) {
+        // Clear validation errors immediately when user changes pickup time
+        clearValidationErrors("pickup_datetime")
+        _uiState.value = _uiState.value.copy(
+            pickupTime = time,
+            rideData = _uiState.value.rideData.copy(pickupTime = time)
+        )
+        // Re-validate after time change
+        updateValidationErrors()
+    }
+
+    /**
+     * Update flight information for pickup and dropoff
+     */
+    fun setFlightInfo(pickupFlightNumber: String? = null, dropoffFlightNumber: String? = null) {
+        // Clear validation errors immediately when user changes flight info
+        if (pickupFlightNumber != null) {
+            clearValidationErrors("pickup_flight_number")
         }
-        
-        Log.d(DebugTags.BookingProcess, "📋 PROCESSING MISC - Total items: ${rateArray.misc.size}")
-        for ((key, rateItem) in rateArray.misc) {
-            totalBaserate += rateItem.baserate
-            Log.d(DebugTags.BookingProcess, "  ✓ $key: ${rateItem.baserate}")
+        if (dropoffFlightNumber != null) {
+            clearValidationErrors("dropoff_flight_number")
         }
+        _uiState.value = _uiState.value.copy(
+            rideData = _uiState.value.rideData.copy(
+                pickupFlightNumber = pickupFlightNumber,
+                dropoffFlightNumber = dropoffFlightNumber
+            )
+        )
+        // Re-validate after flight info change
+        updateValidationErrors()
+    }
+
+    /**
+     * Update airport information for pickup and dropoff
+     */
+    fun setAirportInfo(
+        pickupAirport: String? = null,
+        dropoffAirport: String? = null,
+        originAirportCity: String? = null
+    ) {
+        // Clear validation errors immediately when user changes airport info
+        if (pickupAirport != null) {
+            clearValidationErrors("pickup_airport", "pickup_coordinates")
+        }
+        if (dropoffAirport != null) {
+            // Clear both airport and coordinates errors when airport is set
+            // This fixes the issue where coordinates error shows even when airport is selected
+            clearValidationErrors("dropoff_airport", "dropoff_coordinates")
+        }
+        if (originAirportCity != null) {
+            clearValidationErrors("origin_airport_city")
+        }
+        _uiState.value = _uiState.value.copy(
+            rideData = _uiState.value.rideData.copy(
+                selectedPickupAirport = pickupAirport ?: _uiState.value.rideData.selectedPickupAirport,
+                selectedDestinationAirport = dropoffAirport ?: _uiState.value.rideData.selectedDestinationAirport,
+                originAirportCity = originAirportCity ?: _uiState.value.rideData.originAirportCity
+            )
+        )
+        // Re-validate after airport info change
+        updateValidationErrors()
+    }
+
+    /**
+     * Update airline information for pickup and dropoff
+     */
+    fun setAirlineInfo(
+        pickupAirline: String? = null,
+        dropoffAirline: String? = null
+    ) {
+        // Clear validation errors immediately when user changes airline info
+        if (pickupAirline != null) {
+            clearValidationErrors("pickup_airline")
+        }
+        if (dropoffAirline != null) {
+            clearValidationErrors("dropoff_airline")
+        }
+        _uiState.value = _uiState.value.copy(
+            rideData = _uiState.value.rideData.copy(
+                selectedPickupAirline = pickupAirline ?: _uiState.value.rideData.selectedPickupAirline,
+                selectedDestinationAirline = dropoffAirline ?: _uiState.value.rideData.selectedDestinationAirline
+            )
+        )
+        // Re-validate after airline info change
+        updateValidationErrors()
+    }
+
+    /**
+     * Update vehicle selection
+     */
+    fun setVehicle(vehicle: Vehicle?) {
+        _uiState.value = _uiState.value.copy(vehicle = vehicle)
+    }
+
+    /**
+     * Update profile data
+     */
+    fun setProfileData(profileData: com.example.limouserapp.data.model.dashboard.ProfileData?) {
+        _uiState.value = _uiState.value.copy(profileData = profileData)
+        // Re-validate after profile data change
+        updateValidationErrors()
+    }
+
+    /**
+     * Update loading state
+     */
+    fun setLoading(isLoading: Boolean) {
+        _uiState.value = _uiState.value.copy(isLoading = isLoading)
+    }
+
+    /**
+     * Initialize the UI state from initial ride data and vehicle
+     * Called when the screen is first shown to populate the ViewModel state
+     */
+    fun initialize(rideData: RideData, vehicle: Vehicle? = null, profileData: com.example.limouserapp.data.model.dashboard.ProfileData? = null) {
+        val serviceType = ServiceType.fromValue(rideData.serviceType)
+        // Normalize pickup/dropoff types - handle "cruise port" -> "cruise"
+        val normalizedPickupType = rideData.pickupType.lowercase().replace("cruise port", "cruise").replace("cruise_port", "cruise").trim()
+        val normalizedDropoffType = rideData.dropoffType.lowercase().replace("cruise port", "cruise").replace("cruise_port", "cruise").trim()
+        val transferType = TransferType.fromTypes(normalizedPickupType, normalizedDropoffType)
+        Log.d(DebugTags.BookingProcess, "🎯 Initializing transfer type: pickupType='${rideData.pickupType}' -> normalized='$normalizedPickupType', dropoffType='${rideData.dropoffType}' -> normalized='$normalizedDropoffType', transferType='${transferType.displayName}'")
         
-        // Calculate subtotal: total baserate + 25% of all_inclusive_rates baserate
-        val twentyFivePercentOfAllInclusive = allInclusiveBaserate * 0.25
-        val calculatedSubtotal = totalBaserate + twentyFivePercentOfAllInclusive
-        
-        // Grand total = subtotal × number of vehicles
-        val calculatedGrandTotal = calculatedSubtotal * numberOfVehicles
-        
-        Log.d(DebugTags.BookingProcess, "📊 RATE CALCULATION BREAKDOWN:")
-        Log.d(DebugTags.BookingProcess, "Service Type: $serviceType")
-        Log.d(DebugTags.BookingProcess, "Hours Multiplier: $hoursMultiplier")
-        Log.d(DebugTags.BookingProcess, "All Inclusive Baserate (adjusted): $allInclusiveBaserate")
-        Log.d(DebugTags.BookingProcess, "Total Baserate (all categories, adjusted): $totalBaserate")
-        Log.d(DebugTags.BookingProcess, "25% of All Inclusive: $twentyFivePercentOfAllInclusive")
-        Log.d(DebugTags.BookingProcess, "Calculated Subtotal: $calculatedSubtotal")
-        Log.d(DebugTags.BookingProcess, "Number of Vehicles: $numberOfVehicles")
-        Log.d(DebugTags.BookingProcess, "Calculated Grand Total: $calculatedGrandTotal (Subtotal × $numberOfVehicles)")
-        
-        return Pair(calculatedSubtotal, calculatedGrandTotal)
+        // Initialize passenger fields from profile data (matches web app)
+        val passengerName = profileData?.let { 
+            val firstName = it.firstName?.trim() ?: ""
+            val lastName = it.lastName?.trim() ?: ""
+            val middleName = it.middleName?.trim() ?: ""
+            when {
+                middleName.isNotEmpty() -> "$firstName $middleName $lastName"
+                else -> "$firstName $lastName"
+            }.trim()
+        } ?: ""
+        val passengerEmail = profileData?.email?.trim() ?: ""
+        val passengerMobile = profileData?.mobile?.trim() ?: ""
+
+        _uiState.value = BookingUiState(
+            rideData = rideData,
+            vehicle = vehicle,
+            pickupDate = rideData.pickupDate,
+            pickupTime = rideData.pickupTime,
+            serviceType = serviceType,
+            transferType = transferType,
+            pickupLocation = rideData.pickupLocation,
+            dropoffLocation = rideData.destinationLocation,
+            passengerCount = rideData.noOfPassenger.toString(),
+            luggageCount = rideData.noOfLuggage.toString(),
+            profileData = profileData,
+            passengerName = passengerName,
+            passengerEmail = passengerEmail,
+            passengerMobile = passengerMobile,
+            // Initialize return trip fields from rideData if available
+            returnPickupDate = rideData.returnPickupDate ?: "",
+            returnPickupTime = rideData.returnPickupTime ?: ""
+        )
+
+        // Trigger initial validation
+        updateValidationErrors()
+
+        Log.d(DebugTags.BookingProcess, "🎯 ViewModel initialized with rideData and vehicle")
+    }
+    
+    /**
+     * Update passenger name - ensures validation is triggered
+     */
+    fun setPassengerName(name: String) {
+        // Clear validation errors immediately when user changes passenger name
+        clearValidationErrors("passenger_name")
+        _uiState.value = _uiState.value.copy(passengerName = name)
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update passenger email - ensures validation is triggered
+     */
+    fun setPassengerEmail(email: String) {
+        // Clear validation errors immediately when user changes passenger email
+        clearValidationErrors("passenger_email")
+        _uiState.value = _uiState.value.copy(passengerEmail = email)
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update passenger mobile - ensures validation is triggered
+     */
+    fun setPassengerMobile(mobile: String) {
+        // Clear validation errors immediately when user changes passenger mobile
+        clearValidationErrors("passenger_mobile")
+        _uiState.value = _uiState.value.copy(passengerMobile = mobile)
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update cruise pickup information
+     */
+    fun setCruisePickupInfo(port: String, shipName: String, arrivalTime: String) {
+        // Clear validation errors immediately when user changes cruise fields
+        clearValidationErrors("cruise_pickup_port", "cruise_pickup_ship")
+        _uiState.value = _uiState.value.copy(
+            cruisePort = port,
+            cruiseShipName = shipName,
+            shipArrivalTime = arrivalTime
+        )
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update cruise dropoff information
+     */
+    fun setCruiseDropoffInfo(port: String, shipName: String, arrivalTime: String) {
+        // Clear validation errors immediately when user changes cruise fields
+        clearValidationErrors("cruise_dropoff_port", "cruise_dropoff_ship")
+        _uiState.value = _uiState.value.copy(
+            dropoffCruisePort = port,
+            dropoffCruiseShipName = shipName,
+            dropoffShipArrivalTime = arrivalTime
+        )
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update return pickup date
+     */
+    fun setReturnPickupDate(date: String) {
+        // Clear validation error immediately when date is set
+        clearValidationErrors("return_pickup_datetime")
+        val currentTime = _uiState.value.returnPickupTime
+        _uiState.value = _uiState.value.copy(returnPickupDate = date)
+        // Only re-validate if both date and time are filled, otherwise the error will be re-added
+        if (date.isNotEmpty() && currentTime.isNotEmpty()) {
+            // Both are filled, safe to re-validate (won't add error back)
+            updateValidationErrors()
+        }
+        // If only date is filled, don't re-validate yet (time might be empty, which would re-add the error)
+    }
+    
+    /**
+     * Update return pickup time
+     */
+    fun setReturnPickupTime(time: String) {
+        // Clear validation error immediately when time is set
+        clearValidationErrors("return_pickup_datetime")
+        val currentDate = _uiState.value.returnPickupDate
+        _uiState.value = _uiState.value.copy(returnPickupTime = time)
+        // Only re-validate if both date and time are filled, otherwise the error will be re-added
+        if (time.isNotEmpty() && currentDate.isNotEmpty()) {
+            // Both are filled, safe to re-validate (won't add error back)
+            updateValidationErrors()
+        }
+        // If only time is filled, don't re-validate yet (date might be empty, which would re-add the error)
+    }
+    
+    /**
+     * Update return pickup location
+     */
+    fun setReturnPickupLocation(address: String, lat: Double? = null, long: Double? = null) {
+        clearValidationErrors("return_pickup_location", "return_pickup_coordinates")
+        _uiState.value = _uiState.value.copy(
+            returnPickupLocation = address,
+            returnPickupLat = lat,
+            returnPickupLong = long
+        )
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update return dropoff location
+     */
+    fun setReturnDropoffLocation(address: String, lat: Double? = null, long: Double? = null) {
+        clearValidationErrors("return_dropoff_location", "return_dropoff_coordinates")
+        _uiState.value = _uiState.value.copy(
+            returnDropoffLocation = address,
+            returnDropoffLat = lat,
+            returnDropoffLong = long
+        )
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update return transfer type
+     */
+    fun setReturnTransferType(type: TransferType) {
+        clearValidationErrors("return_pickup_airport", "return_dropoff_airport", "return_pickup_airline", "return_dropoff_airline", "return_pickup_flight_number", "return_origin_airport_city", "return_cruise_pickup_port", "return_cruise_pickup_ship", "return_cruise_dropoff_port", "return_cruise_dropoff_ship")
+        _uiState.value = _uiState.value.copy(returnTransferType = type)
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update return airport information
+     */
+    fun setReturnAirportInfo(
+        pickupAirport: String? = null,
+        dropoffAirport: String? = null
+    ) {
+        if (pickupAirport != null) {
+            clearValidationErrors("return_pickup_airport")
+        }
+        if (dropoffAirport != null) {
+            clearValidationErrors("return_dropoff_airport")
+        }
+        _uiState.value = _uiState.value.copy(
+            returnPickupAirport = pickupAirport ?: _uiState.value.returnPickupAirport,
+            returnDropoffAirport = dropoffAirport ?: _uiState.value.returnDropoffAirport
+        )
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update return airline information
+     */
+    fun setReturnAirlineInfo(
+        pickupAirline: String? = null,
+        dropoffAirline: String? = null
+    ) {
+        if (pickupAirline != null) {
+            clearValidationErrors("return_pickup_airline")
+        }
+        if (dropoffAirline != null) {
+            clearValidationErrors("return_dropoff_airline")
+        }
+        _uiState.value = _uiState.value.copy(
+            returnPickupAirline = pickupAirline ?: _uiState.value.returnPickupAirline,
+            returnDropoffAirline = dropoffAirline ?: _uiState.value.returnDropoffAirline
+        )
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update return flight information
+     */
+    fun setReturnFlightInfo(
+        pickupFlightNumber: String? = null,
+        originAirportCity: String? = null
+    ) {
+        if (pickupFlightNumber != null) {
+            clearValidationErrors("return_pickup_flight_number")
+        }
+        if (originAirportCity != null) {
+            clearValidationErrors("return_origin_airport_city")
+        }
+        _uiState.value = _uiState.value.copy(
+            returnPickupFlightNumber = pickupFlightNumber ?: _uiState.value.returnPickupFlightNumber,
+            returnOriginAirportCity = originAirportCity ?: _uiState.value.returnOriginAirportCity
+        )
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update return cruise information
+     */
+    fun setReturnCruiseInfo(port: String, shipName: String, arrivalTime: String) {
+        clearValidationErrors("return_cruise_pickup_port", "return_cruise_pickup_ship", "return_cruise_dropoff_port", "return_cruise_dropoff_ship")
+        _uiState.value = _uiState.value.copy(
+            returnCruisePort = port,
+            returnCruiseShipName = shipName,
+            returnShipArrivalTime = arrivalTime
+        )
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update return cruise pickup information
+     */
+    fun setReturnCruisePickupInfo(port: String, shipName: String, arrivalTime: String) {
+        // Clear validation errors immediately when user changes cruise fields
+        clearValidationErrors("return_cruise_pickup_port", "return_cruise_pickup_ship")
+        _uiState.value = _uiState.value.copy(
+            returnCruisePort = port,
+            returnCruiseShipName = shipName,
+            returnShipArrivalTime = arrivalTime
+        )
+        updateValidationErrors()
+    }
+    
+    /**
+     * Update return cruise dropoff information
+     */
+    fun setReturnCruiseDropoffInfo(port: String, shipName: String, arrivalTime: String) {
+        // Clear validation errors immediately when user changes cruise fields
+        clearValidationErrors("return_cruise_dropoff_port", "return_cruise_dropoff_ship")
+        _uiState.value = _uiState.value.copy(
+            returnCruisePort = port,
+            returnCruiseShipName = shipName,
+            returnShipArrivalTime = arrivalTime
+        )
+        updateValidationErrors()
     }
 }
 

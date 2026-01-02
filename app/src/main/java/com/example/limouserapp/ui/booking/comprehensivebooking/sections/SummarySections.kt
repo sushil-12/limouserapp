@@ -169,12 +169,19 @@ fun DistanceInformationSection(
     ) {
         if (isLoading) {
             TextShimmerRow()
-        } else {
+        } else if (outboundDistance.first.isNotEmpty() || outboundDistance.second.isNotEmpty()) {
             // Outbound Leg (or Total Trip for one-way/charter)
             TripLegRow(
                 label = if (serviceType.equals("Round Trip", ignoreCase = true)) "OUTBOUND TRIP" else "TOTAL TRIP",
                 distance = outboundDistance.first,
                 duration = outboundDistance.second
+            )
+        } else {
+            // Show placeholder when distance is not yet calculated
+            TripLegRow(
+                label = if (serviceType.equals("Round Trip", ignoreCase = true)) "OUTBOUND TRIP" else "TOTAL TRIP",
+                distance = "",
+                duration = ""
             )
         }
     }
@@ -196,11 +203,18 @@ fun ReturnDistanceInformationSection(
     ) {
         if (isLoading) {
             TextShimmerRow()
-        } else {
+        } else if (returnDistance.first.isNotEmpty() || returnDistance.second.isNotEmpty()) {
             TripLegRow(
                 label = "RETURN TRIP",
                 distance = returnDistance.first,
                 duration = returnDistance.second
+            )
+        } else {
+            // Show placeholder when distance is not yet calculated
+            TripLegRow(
+                label = "RETURN TRIP",
+                distance = "",
+                duration = ""
             )
         }
     }
@@ -215,10 +229,20 @@ private fun TripLegRow(
     duration: String
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        // Section Label (e.g., "TOTAL TRIP")
-        
+        // Section Label (e.g., "TOTAL TRIP", "OUTBOUND TRIP", "RETURN TRIP")
+        Text(
+            text = label,
+            style = TextStyle(
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = LimoOrange,
+                lineHeight = 24.sp
+            ),
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
 
         // Distance Row: "Total Distance: X Miles / Y Km"
+        if (distance.isNotEmpty()) {
         val formattedDistance = formatDistanceWithMilesAndKm(distance)
         Text(
             text = "Total Distance: $formattedDistance",
@@ -230,8 +254,10 @@ private fun TripLegRow(
             ),
             modifier = Modifier.padding(bottom = 8.dp)
         )
+        }
 
         // Duration Row: "Estimated time: X hours, Y minutes"
+        if (duration.isNotEmpty()) {
         val formattedDuration = formatDurationWithComma(duration)
         Text(
             text = "Estimated time: $formattedDuration",
@@ -242,6 +268,20 @@ private fun TripLegRow(
                 lineHeight = 22.sp
             )
         )
+        }
+        
+        // Show message if both distance and duration are empty
+        if (distance.isEmpty() && duration.isEmpty()) {
+            Text(
+                text = "Distance and time will be calculated...",
+                style = TextStyle(
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = Color.Gray,
+                    lineHeight = 20.sp
+                )
+            )
+        }
     }
 }
 

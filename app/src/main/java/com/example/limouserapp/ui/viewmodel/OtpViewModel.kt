@@ -81,6 +81,9 @@ class OtpViewModel @Inject constructor(
             is OtpUiEvent.ClearError -> {
                 clearError()
             }
+            is OtpUiEvent.ClearSuccess -> {
+                clearSuccess()
+            }
         }
     }
 
@@ -371,6 +374,12 @@ class OtpViewModel @Inject constructor(
      */
     private fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
+    }
+
+    private fun clearSuccess() {
+        _uiState.value = _uiState.value.copy(success = false, nextAction = null)
+        // Also clear shared data to ensure phone entry screen starts fresh
+        sharedDataStore.clearData()
     }
 
     override fun onCleared() {

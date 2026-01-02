@@ -7,6 +7,7 @@ import androidx.security.crypto.MasterKey
 import com.example.limouserapp.data.model.dashboard.UserProfile
 import com.google.gson.Gson
 import dagger.hilt.android.qualifiers.ApplicationContext
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -32,6 +33,7 @@ class UserStateManager @Inject constructor(
         private const val KEY_BASIC_DETAILS_EMAIL = "basic_details_email"
         private const val KEY_JUST_NAVIGATED_BACK_FROM_CREDIT_CARD = "just_navigated_back_from_credit_card"
         private const val KEY_USER_PROFILE_DATA = "user_profile_data"
+        private const val KEY_PROFILE_UPDATED_FROM_ACCOUNT_SETTINGS = "profile_updated_from_account_settings"
     }
     
     private val masterKey = MasterKey.Builder(context)
@@ -200,6 +202,27 @@ class UserStateManager @Inject constructor(
      */
     fun getJustNavigatedBackFromCreditCard(): Boolean {
         return sharedPreferences.getBoolean(KEY_JUST_NAVIGATED_BACK_FROM_CREDIT_CARD, false)
+    }
+
+    /**
+     * Set flag indicating profile was updated from AccountSettings
+     * Dashboard will check this flag and refresh profile if needed
+     */
+    fun setProfileUpdatedFromAccountSettings(updated: Boolean) {
+        Timber.d("UserStateManager: setProfileUpdatedFromAccountSettings($updated)")
+        sharedPreferences.edit()
+            .putBoolean(KEY_PROFILE_UPDATED_FROM_ACCOUNT_SETTINGS, updated)
+            .apply()
+        Timber.d("UserStateManager: Flag saved to SharedPreferences")
+    }
+
+    /**
+     * Get flag indicating profile was updated from AccountSettings
+     */
+    fun getProfileUpdatedFromAccountSettings(): Boolean {
+        val value = sharedPreferences.getBoolean(KEY_PROFILE_UPDATED_FROM_ACCOUNT_SETTINGS, false)
+        Timber.d("UserStateManager: getProfileUpdatedFromAccountSettings() = $value")
+        return value
     }
 
     /**

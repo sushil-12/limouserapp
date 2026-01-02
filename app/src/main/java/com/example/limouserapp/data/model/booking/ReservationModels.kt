@@ -466,7 +466,9 @@ data class EditReservationData(
     @SerializedName("return_dropoff_longitude") val returnDropoffLongitude: Double? = null,
     @SerializedName("meet_greet_choices") val meetGreetChoices: Int,
     @SerializedName("return_meet_greet_choices") val returnMeetGreetChoices: Int? = null,
+    @JsonAdapter(ExtraStopsStringTypeAdapter::class)
     @SerializedName("extra_stops") val extraStops: String? = null,
+    @JsonAdapter(ExtraStopsStringTypeAdapter::class)
     @SerializedName("return_extra_stops") val returnExtraStops: String? = null,
     @SerializedName("service_type") val serviceType: String,
     @SerializedName("pickup_date") val pickupDate: String,

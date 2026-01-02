@@ -36,4 +36,5 @@ sealed class OtpUiEvent {
     object VerifyOtp : OtpUiEvent()
     object ResendOtp : OtpUiEvent()
     object ClearError : OtpUiEvent()
+    object ClearSuccess : OtpUiEvent()
 }

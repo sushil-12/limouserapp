@@ -50,6 +50,9 @@ class PhoneEntryViewModel @Inject constructor(
             is PhoneEntryUiEvent.ClearError -> {
                 clearError()
             }
+            is PhoneEntryUiEvent.ClearSuccess -> {
+                clearSuccess()
+            }
         }
     }
 
@@ -199,6 +202,10 @@ class PhoneEntryViewModel @Inject constructor(
      */
     private fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
+    }
+
+    private fun clearSuccess() {
+        _uiState.value = _uiState.value.copy(success = false, tempUserId = "", phoneNumberWithCountryCode = "")
     }
 
     /**

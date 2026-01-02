@@ -32,9 +32,7 @@ fun ExtraStopsSection(
     onRemoveStop: (ExtraStop) -> Unit,
     onLocationSelected: (ExtraStop, String, String, String, String, String, Double?, Double?, String?) -> Unit,
     onLocationChange: (ExtraStop, String) -> Unit,
-    onInstructionsChange: (ExtraStop, String) -> Unit,
-    showInvalidLocationDialog: Boolean,
-    invalidLocationMessage: String
+    onInstructionsChange: (ExtraStop, String) -> Unit
 ) {
     BaseExtraStopsLayout(
         title = "Extra Stops",
@@ -43,9 +41,7 @@ fun ExtraStopsSection(
         onRemoveStop = onRemoveStop,
         onLocationSelected = onLocationSelected,
         onLocationChange = onLocationChange,
-        onInstructionsChange = onInstructionsChange,
-        showError = showInvalidLocationDialog,
-        errorMessage = invalidLocationMessage
+        onInstructionsChange = onInstructionsChange
     )
 }
 
@@ -59,9 +55,7 @@ fun ReturnExtraStopsSection(
     onRemoveStop: (ExtraStop) -> Unit,
     onLocationSelected: (ExtraStop, String, String, String, String, String, Double?, Double?, String?) -> Unit,
     onLocationChange: (ExtraStop, String) -> Unit,
-    onInstructionsChange: (ExtraStop, String) -> Unit,
-    showInvalidLocationDialog: Boolean,
-    invalidLocationMessage: String
+    onInstructionsChange: (ExtraStop, String) -> Unit
 ) {
     BaseExtraStopsLayout(
         title = "Return Trip Stops",
@@ -71,8 +65,6 @@ fun ReturnExtraStopsSection(
         onLocationSelected = onLocationSelected,
         onLocationChange = onLocationChange,
         onInstructionsChange = onInstructionsChange,
-        showError = showInvalidLocationDialog,
-        errorMessage = invalidLocationMessage,
         isReturn = true
     )
 }
@@ -89,8 +81,6 @@ private fun BaseExtraStopsLayout(
     onLocationSelected: (ExtraStop, String, String, String, String, String, Double?, Double?, String?) -> Unit,
     onLocationChange: (ExtraStop, String) -> Unit,
     onInstructionsChange: (ExtraStop, String) -> Unit,
-    showError: Boolean,
-    errorMessage: String,
     isReturn: Boolean = false
 ) {
     Column(
@@ -163,33 +153,6 @@ private fun BaseExtraStopsLayout(
                     color = Color.White
                 )
             )
-        }
-
-        // 4. Error Banner (if needed)
-        if (showError) {
-            Surface(
-                color = Color(0xFFFFEBEE),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, Color(0xFFFFCDD2)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Error",
-                        tint = Color(0xFFC62828),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = errorMessage,
-                        style = TextStyle(fontSize = 12.sp, color = Color(0xFFC62828))
-                    )
-                }
-            }
         }
     }
 }

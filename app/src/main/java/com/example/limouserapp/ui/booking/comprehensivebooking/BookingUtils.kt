@@ -25,8 +25,9 @@ fun getServiceTypeDisplayName(serviceType: String): String {
 }
 
 fun getTransferTypeDisplayName(rideData: RideData): String {
-    val pickupType = rideData.pickupType.lowercase()
-    val dropoffType = rideData.dropoffType.lowercase()
+    // Normalize types - handle "cruise port" -> "cruise"
+    val pickupType = rideData.pickupType.lowercase().replace("cruise port", "cruise").replace("cruise_port", "cruise").trim()
+    val dropoffType = rideData.dropoffType.lowercase().replace("cruise port", "cruise").replace("cruise_port", "cruise").trim()
     
     return when {
         pickupType == "city" && dropoffType == "city" -> "City to City"
@@ -35,6 +36,9 @@ fun getTransferTypeDisplayName(rideData: RideData): String {
         pickupType == "airport" && dropoffType == "airport" -> "Airport to Airport"
         pickupType == "city" && dropoffType == "cruise" -> "City to Cruise Port"
         pickupType == "cruise" && dropoffType == "city" -> "Cruise Port to City"
+        pickupType == "airport" && dropoffType == "cruise" -> "Airport to Cruise Port"
+        pickupType == "cruise" && dropoffType == "airport" -> "Cruise Port to Airport"
+        pickupType == "cruise" && dropoffType == "cruise" -> "Cruise Port to Cruise Port"
         else -> "City to City"
     }
 }
@@ -533,7 +537,7 @@ fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): D
 
 /**
  * Convert ExtraStop list to ExtraStopRequest list for API
- * This version uses default "out_town" rate (backward compatibility)
+ * This version uses default "out_town" rate (backward compatibility - non-suspend)
  */
 fun List<ExtraStop>.toExtraStopRequests(): List<ExtraStopRequest> {
     return this.filter { it.isLocationSelected && it.latitude != null && it.longitude != null }
@@ -542,7 +546,7 @@ fun List<ExtraStop>.toExtraStopRequests(): List<ExtraStopRequest> {
                 address = stop.address,
                 latitude = stop.latitude!!,
                 longitude = stop.longitude!!,
-                rate = "out_town",
+                rate = "out_town", // Default - use toExtraStopRequestsWithTownComparison() for proper calculation
                 bookingInstructions = stop.bookingInstructions
             )
         }
@@ -551,8 +555,8 @@ fun List<ExtraStop>.toExtraStopRequests(): List<ExtraStopRequest> {
 /**
  * Convert ExtraStop list to ExtraStopRequest list for API with town comparison
  * Matches web app's checkExtraStopInTown() logic
- * @param placesService PlacesService instance for town comparison
- * @param pickupLocation Pickup location address string for comparison
+ * @param placesService PlacesService instance for town comparison (required)
+ * @param pickupLocation Pickup location address string for comparison (required)
  * @return List of ExtraStopRequest with calculated rates (in_town or out_town)
  */
 suspend fun List<ExtraStop>.toExtraStopRequestsWithTownComparison(
