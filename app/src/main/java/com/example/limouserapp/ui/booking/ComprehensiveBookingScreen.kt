@@ -1388,6 +1388,12 @@ fun ComprehensiveBookingScreen(
                 returnSpecialInstructions = newReturnSpecialInstructions
                 Log.d(DebugTags.BookingProcess, "🔄 Auto-updated return special instructions for transfer type: $returnTransferType")
             }
+            
+            // Trigger validation when return transfer type changes to airport (to show required field errors immediately)
+            if (returnTransferType.startsWith("Airport", ignoreCase = true)) {
+                vm.updateValidationErrors()
+                Log.d(DebugTags.BookingProcess, "🔄 Triggered validation for return airport pickup")
+            }
         }
     }
 
@@ -1396,7 +1402,11 @@ fun ComprehensiveBookingScreen(
         if (selectedServiceType == "Round Trip") {
             // Auto-reverse transfer type for return trip
             if (selectedReturnTransferType == null) {
-                selectedReturnTransferType = getReversedTransferType(selectedTransferType)
+                val reversedType = getReversedTransferType(selectedTransferType)
+                selectedReturnTransferType = reversedType
+                // CRITICAL: Sync return transfer type to ViewModel immediately so validation can work
+                vm.setReturnTransferType(TransferType.fromDisplayName(reversedType))
+                Log.d(DebugTags.BookingProcess, "🔄 Auto-set return transfer type to: $reversedType and synced to ViewModel")
             }
 
             // Copy values from outbound trip
@@ -1434,6 +1444,14 @@ fun ComprehensiveBookingScreen(
 
             // Pre-fill return locations based on reversed transfer type
             val reversedType = selectedReturnTransferType ?: getReversedTransferType(selectedTransferType)
+            
+            // CRITICAL: Trigger validation after return transfer type is set (especially for airport pickups)
+            if (reversedType.startsWith("Airport", ignoreCase = true)) {
+                // For airport pickups, validate immediately to show required field errors
+                vm.updateValidationErrors()
+                Log.d(DebugTags.BookingProcess, "🔄 Triggered validation for auto-set return airport pickup")
+            }
+            
             if (returnPickupLocation.isEmpty() && reversedType.contains("City")) {
                 // Return pickup is city, use dropoff location from outbound
                 returnPickupLocation = dropoffLocation
@@ -1495,6 +1513,23 @@ fun ComprehensiveBookingScreen(
                     // Sync to ViewModel
                     vm.setReturnPickupLocation(returnPickupLocation, returnPickupLat, returnPickupLong)
                     Log.d(DebugTags.BookingProcess, "✅ Auto-filled return pickup location coordinates: (Lat: $returnPickupLat, Long: $returnPickupLong)")
+                }
+            }
+            
+            // CRITICAL: Trigger validation when Round Trip is selected to show required field errors immediately
+            // This ensures validation errors are shown even if return transfer type was auto-set
+            val currentReturnTransferType = selectedReturnTransferType ?: getReversedTransferType(selectedTransferType)
+            if (currentReturnTransferType.startsWith("Airport", ignoreCase = true)) {
+                // Trigger validation immediately
+                vm.updateValidationErrors()
+                Log.d(DebugTags.BookingProcess, "🔄 Triggered immediate validation for Round Trip with airport return pickup")
+                // Also trigger after a small delay to catch any state updates
+                coroutineScope {
+                    launch {
+                        delay(200)
+                        vm.updateValidationErrors()
+                        Log.d(DebugTags.BookingProcess, "🔄 Triggered delayed validation for Round Trip with airport return pickup")
+                    }
                 }
             }
         }
@@ -3670,16 +3705,17 @@ fun ComprehensiveBookingScreen(
     }
 
     // Ship Arrival Time Picker Dialog (for pickup cruise)
-    val shipArrivalSelectedTime = remember(shipArrivalTime) {
-        if (shipArrivalTime.isNotEmpty()) {
+    var shipArrivalSelectedTime by remember(shipArrivalTime) {
+        val date = if (shipArrivalTime.isNotEmpty()) {
             try {
-                timeFormatter.parse(shipArrivalTime)
+                timeFormatter.parse(shipArrivalTime) ?: Calendar.getInstance().time
             } catch (e: Exception) {
                 Calendar.getInstance().time
             }
         } else {
             Calendar.getInstance().time
         }
+        mutableStateOf(date)
     }
     
     if (showShipArrivalTimePicker) {
@@ -3687,6 +3723,7 @@ fun ComprehensiveBookingScreen(
             selectedTime = shipArrivalSelectedTime,
             onTimeSelected = { time ->
                 shipArrivalTime = timeFormatter.format(time)
+                shipArrivalSelectedTime = time
                 vm.setCruisePickupInfo(cruisePort, cruiseShipName, shipArrivalTime)
                 showShipArrivalTimePicker = false
             },
@@ -3696,16 +3733,17 @@ fun ComprehensiveBookingScreen(
 
     // Dropoff Ship Arrival Time Picker Dialog (for dropoff cruise)
     // Note: Uses same shipArrivalTime variable as pickup (shared state)
-    val dropoffShipArrivalSelectedTime = remember(shipArrivalTime) {
-        if (shipArrivalTime.isNotEmpty()) {
+    var dropoffShipArrivalSelectedTime by remember(shipArrivalTime) {
+        val date = if (shipArrivalTime.isNotEmpty()) {
             try {
-                timeFormatter.parse(shipArrivalTime)
+                timeFormatter.parse(shipArrivalTime) ?: Calendar.getInstance().time
             } catch (e: Exception) {
                 Calendar.getInstance().time
             }
         } else {
             Calendar.getInstance().time
         }
+        mutableStateOf(date)
     }
     
     if (showDropoffShipArrivalTimePicker) {
@@ -3714,6 +3752,7 @@ fun ComprehensiveBookingScreen(
             onTimeSelected = { time ->
                 val timeString = timeFormatter.format(time)
                 shipArrivalTime = timeString
+                dropoffShipArrivalSelectedTime = time
                 // Update ViewModel with dropoff cruise info (using same variables as they're shared)
                 vm.setCruiseDropoffInfo(cruisePort, cruiseShipName, timeString)
                 showDropoffShipArrivalTimePicker = false

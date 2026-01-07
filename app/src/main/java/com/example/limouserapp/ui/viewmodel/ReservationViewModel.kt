@@ -1807,7 +1807,8 @@ class ReservationViewModel @Inject constructor(
     }
     
     /**
-     * Calculate totals from rate array - matches iOS calculateTotalsFromRateArray()
+     * Calculate totals from rate array - matches web buildBookingData() logic exactly
+     * Web code: Line 2695-2731 in create-new-booking.component.ts
      */
     private fun calculateTotalsFromRateArray(
         rateArray: BookingRateArray,
@@ -1817,9 +1818,34 @@ class ReservationViewModel @Inject constructor(
         minRateInvolved: Boolean = false
     ): Pair<Double, Double> {
 
+        // ---------- STEP 1: SUM ALL AMOUNT VALUES (WEB LOGIC LINE 2695-2704) ----------
+        // Web code sums all 'amount' values from entire rateArray structure first
         var subtotal = 0.0
+        
+        // Sum all_inclusive_rates amounts
+        for (rateItem in rateArray.allInclusiveRates.values) {
+            subtotal += rateItem.amount ?: 0.0
+        }
+        
+        // Sum amenities amounts
+        for (rateItem in rateArray.amenities.values) {
+            subtotal += rateItem.amount ?: 0.0
+        }
+        
+        // Sum taxes amounts
+        for (taxItem in rateArray.taxes.values) {
+            subtotal += taxItem.amount ?: 0.0
+        }
+        
+        // Sum misc amounts
+        for (rateItem in rateArray.misc.values) {
+            subtotal += rateItem.amount ?: 0.0
+        }
 
-        // ---------- HOURS MULTIPLIER ----------
+        Log.d(DebugTags.BookingProcess, "📊 Step 1 - Subtotal from all amounts: $subtotal")
+
+        // ---------- STEP 2: CALCULATE BASE RATE FOR ADMIN SHARE (WEB LOGIC LINE 2706-2722) ----------
+        // Calculate base_rate from baserates (Base_Rate + ELH_Charges + Stops + Wait + amenities)
         val hoursMultiplier =
             if (serviceType.lowercase() == "charter_tour" && !minRateInvolved) {
                 bookingHour.toIntOrNull() ?: 1
@@ -1827,7 +1853,7 @@ class ReservationViewModel @Inject constructor(
                 1
             }
 
-        // ---------- BASE RATE (RAW) ----------
+        // Base Rate (with hours multiplier for charter_tour)
         val baseRateRaw = rateArray.allInclusiveRates["Base_Rate"]?.baserate ?: 0.0
         val baseRateWithHours =
             if (serviceType.lowercase() == "charter_tour" && !minRateInvolved) {
@@ -1836,59 +1862,50 @@ class ReservationViewModel @Inject constructor(
                 baseRateRaw
             }
 
-        // ---------- ADD STOPS / WAIT / ELH ----------
+        // Add ELH_Charges, Stops, Wait (check for both "ELH_Charges" and "ELH_Charges  " with space)
+        val elh = rateArray.allInclusiveRates["ELH_Charges"]?.baserate ?: 
+                  rateArray.allInclusiveRates["ELH_Charges  "]?.baserate ?: 0.0
         val stops = rateArray.allInclusiveRates["Stops"]?.baserate ?: 0.0
         val wait = rateArray.allInclusiveRates["Wait"]?.baserate ?: 0.0
-        val elh = rateArray.allInclusiveRates["ELH_Charges  "]?.baserate ?: 0.0
 
-        Log.d(DebugTags.BookingProcess, "SUSHIL LOGS")
-        Log.d(DebugTags.BookingProcess, "stops, ${stops}")
-        Log.d(DebugTags.BookingProcess, "stops, ${rateArray.toString()}")
+        var baseRate = baseRateWithHours + elh + stops + wait
 
-        var baseForAdmin = baseRateWithHours + stops + wait + elh
-        Log.d(DebugTags.BookingProcess, "SUSHIL LOGS")
-        Log.d(DebugTags.BookingProcess, "BASE RATE ADMIN, ${baseForAdmin}")
-
-        // ---------- ADD AMENITIES TO BASE ----------
+        // Add amenities baserates to base_rate
         for (rateItem in rateArray.amenities.values) {
-            baseForAdmin += rateItem.baserate
+            baseRate += rateItem.baserate
         }
 
-        // ---------- ADMIN SHARE (WEB LOGIC) ----------
+        Log.d(DebugTags.BookingProcess, "📊 Step 2 - Base rate for admin share calculation: $baseRate")
+        Log.d(DebugTags.BookingProcess, "  Base_Rate (with hours): $baseRateWithHours")
+        Log.d(DebugTags.BookingProcess, "  ELH_Charges: $elh")
+        Log.d(DebugTags.BookingProcess, "  Stops: $stops")
+        Log.d(DebugTags.BookingProcess, "  Wait: $wait")
+        Log.d(DebugTags.BookingProcess, "  Amenities sum: ${rateArray.amenities.values.sumOf { it.baserate }}")
+
+        // ---------- STEP 3: ADD ADMIN SHARE TO SUBTOTAL (WEB LOGIC LINE 2724-2730) ----------
+        // Web code adds admin share based on conditions (25% for individual, 15% for travel_planner, etc.)
+        // For individual account type, use 25% (web code line 741-743)
         val adminSharePercent = 25.0
-        val adminShare =
-            if (minRateInvolved) 0.0 else (baseForAdmin * adminSharePercent / 100)
-
-        Log.d(DebugTags.BookingProcess, "BASE RATE ADMIN SHARE, ${adminShare}")
-
-        val baseAfterAdmin = baseForAdmin + adminShare
-
-        // ---------- ADD BASE TO SUBTOTAL ----------
-        subtotal += baseAfterAdmin
-
-        // ---------- TAXES ----------
-        for (taxItem in rateArray.taxes.values) {
-            val taxAmount =
-                if (taxItem.type == "percent") {
-                    (taxItem.baserate / 100) * baseAfterAdmin
-                } else {
-                    taxItem.baserate
-                }
-            subtotal += taxAmount
+        val adminShare = if (minRateInvolved) {
+            0.0
+        } else {
+            (baseRate * adminSharePercent / 100)
         }
 
-        // ---------- MISC ----------
-        for (rateItem in rateArray.misc.values) {
-            subtotal += rateItem.baserate
-        }
+        subtotal += adminShare
 
+        Log.d(DebugTags.BookingProcess, "📊 Step 3 - Admin share (${adminSharePercent}% of base_rate): $adminShare")
+        Log.d(DebugTags.BookingProcess, "📊 Final subtotal (amounts + admin share): $subtotal")
+
+        // ---------- STEP 4: CALCULATE GRAND TOTAL (WEB LOGIC - applied in submitForm) ----------
+        // Web code applies vehicle multiplier in submitForm (line 2549)
         subtotal = subtotal.roundToTwo()
         val grandTotal = (subtotal * numberOfVehicles).roundToTwo()
 
-        Log.d(DebugTags.BookingProcess, "✅ WEB-MATCHED CALCULATION")
-        Log.d(DebugTags.BookingProcess, "Base After Admin: $baseAfterAdmin")
-        Log.d(DebugTags.BookingProcess, "Subtotal: $subtotal")
-        Log.d(DebugTags.BookingProcess, "Grand Total: $grandTotal")
+        Log.d(DebugTags.BookingProcess, "✅ WEB-MATCHED CALCULATION COMPLETE")
+        Log.d(DebugTags.BookingProcess, "  Subtotal: $subtotal")
+        Log.d(DebugTags.BookingProcess, "  Number of Vehicles: $numberOfVehicles")
+        Log.d(DebugTags.BookingProcess, "  Grand Total: $grandTotal")
 
         return Pair(subtotal, grandTotal)
     }
@@ -1929,29 +1946,28 @@ class ReservationViewModel @Inject constructor(
                                 transferType == "airport_to_airport")
         
         // Location validation - check based on transfer type
-        if (!isPickupAirport && currentState.pickupLocation.isEmpty()) {
-            errors.add("pickup_location")
+        // For non-airport pickups: BOTH location AND coordinates must be present (matches web app validation)
+        // This prevents API calls when location is cleared but coordinates remain
+        if (!isPickupAirport) {
+            if (currentState.pickupLocation.isEmpty() || 
+                currentState.rideData.pickupLat == null || 
+                currentState.rideData.pickupLong == null) {
+                errors.add("pickup_location")
+            }
         }
-        if (!isDropoffAirport && currentState.dropoffLocation.isEmpty()) {
-            errors.add("dropoff_location")
+        // For non-airport dropoffs: BOTH location AND coordinates must be present
+        if (!isDropoffAirport) {
+            if (currentState.dropoffLocation.isEmpty() || 
+                currentState.rideData.destinationLat == null || 
+                currentState.rideData.destinationLong == null) {
+                errors.add("dropoff_location")
+            }
         }
         if (isPickupAirport && currentState.rideData.selectedPickupAirport.isEmpty()) {
             errors.add("pickup_airport")
         }
         if (isDropoffAirport && currentState.rideData.selectedDestinationAirport.isEmpty()) {
             errors.add("dropoff_airport")
-        }
-        if (isDropoffAirport && currentState.rideData.selectedDestinationAirport.isEmpty()) {
-            errors.add("dropoff_airport")
-        }
-
-        // Coordinate validation - only required when location is NOT an airport
-        if (!isPickupAirport && (currentState.rideData.pickupLat == null || currentState.rideData.pickupLong == null)) {
-            errors.add("pickup_coordinates")
-        }
-
-        if (!isDropoffAirport && (currentState.rideData.destinationLat == null || currentState.rideData.destinationLong == null)) {
-            errors.add("dropoff_coordinates")
         }
 
         // Passenger information validation (matches web app - checks editable fields)
@@ -2015,7 +2031,10 @@ class ReservationViewModel @Inject constructor(
                 // Flight number is NOT required for dropoff airport (matches web app - line 1993 is commented out)
             }
             // Cruise dropoff validation - cruise port and cruise ship name are required
-            transferTypeDisplay.endsWith("cruise") -> {
+            // Matches web app: when transfer type includes '_cruise' or 'cruise_', cruise name and port are required
+            transferTypeDisplay.contains("cruise", ignoreCase = true) && 
+            (transferTypeDisplay.endsWith("cruise", ignoreCase = true) || 
+             transferTypeDisplay.endsWith("cruise port", ignoreCase = true)) -> {
                 if (currentState.dropoffCruisePort.isNullOrEmpty()) {
                     errors.add("cruise_dropoff_port")
                 }
@@ -2048,20 +2067,20 @@ class ReservationViewModel @Inject constructor(
                                         (returnTransferTypeDisplay.endsWith("airport", ignoreCase = true) || 
                                          returnTransferTypeDisplay == "airport_to_airport")
             
-            // Return location validation
-            if (!isReturnPickupAirport && currentState.returnPickupLocation.isEmpty()) {
-                errors.add("return_pickup_location")
+            // Return location validation - BOTH location AND coordinates must be present (matches web app validation)
+            if (!isReturnPickupAirport) {
+                if (currentState.returnPickupLocation.isEmpty() || 
+                    currentState.returnPickupLat == null || 
+                    currentState.returnPickupLong == null) {
+                    errors.add("return_pickup_location")
+                }
             }
-            if (!isReturnDropoffAirport && currentState.returnDropoffLocation.isEmpty()) {
-                errors.add("return_dropoff_location")
-            }
-            
-            // Return coordinate validation
-            if (!isReturnPickupAirport && (currentState.returnPickupLat == null || currentState.returnPickupLong == null)) {
-                errors.add("return_pickup_coordinates")
-            }
-            if (!isReturnDropoffAirport && (currentState.returnDropoffLat == null || currentState.returnDropoffLong == null)) {
-                errors.add("return_dropoff_coordinates")
+            if (!isReturnDropoffAirport) {
+                if (currentState.returnDropoffLocation.isEmpty() || 
+                    currentState.returnDropoffLat == null || 
+                    currentState.returnDropoffLong == null) {
+                    errors.add("return_dropoff_location")
+                }
             }
             
             // Return airport validation
@@ -2402,7 +2421,7 @@ class ReservationViewModel @Inject constructor(
     }
 
     /**
-     * Update airport information for pickup and dropoff
+     * Update airport information for pickup and dropoff fields
      */
     fun setAirportInfo(
         pickupAirport: String? = null,
@@ -2662,10 +2681,10 @@ class ReservationViewModel @Inject constructor(
         pickupAirport: String? = null,
         dropoffAirport: String? = null
     ) {
-        if (pickupAirport != null) {
+        if (pickupAirport != null && pickupAirport.isNotEmpty()) {
             clearValidationErrors("return_pickup_airport")
         }
-        if (dropoffAirport != null) {
+        if (dropoffAirport != null && dropoffAirport.isNotEmpty()) {
             clearValidationErrors("return_dropoff_airport")
         }
         _uiState.value = _uiState.value.copy(
@@ -2682,10 +2701,10 @@ class ReservationViewModel @Inject constructor(
         pickupAirline: String? = null,
         dropoffAirline: String? = null
     ) {
-        if (pickupAirline != null) {
+        if (pickupAirline != null && pickupAirline.isNotEmpty()) {
             clearValidationErrors("return_pickup_airline")
         }
-        if (dropoffAirline != null) {
+        if (dropoffAirline != null && dropoffAirline.isNotEmpty()) {
             clearValidationErrors("return_dropoff_airline")
         }
         _uiState.value = _uiState.value.copy(
@@ -2702,10 +2721,10 @@ class ReservationViewModel @Inject constructor(
         pickupFlightNumber: String? = null,
         originAirportCity: String? = null
     ) {
-        if (pickupFlightNumber != null) {
+        if (pickupFlightNumber != null && pickupFlightNumber.isNotEmpty()) {
             clearValidationErrors("return_pickup_flight_number")
         }
-        if (originAirportCity != null) {
+        if (originAirportCity != null && originAirportCity.isNotEmpty()) {
             clearValidationErrors("return_origin_airport_city")
         }
         _uiState.value = _uiState.value.copy(

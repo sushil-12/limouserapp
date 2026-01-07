@@ -186,6 +186,7 @@ fun PickupSection(
                         label = "SHIP ARRIVAL TIME",
                         value = shipArrivalTime.ifEmpty { "Select time" },
                         onClick = onShipArrivalClick,
+                        icon = Icons.Default.AccessTime,
                         isError = false
                     )
                 }
@@ -320,6 +321,7 @@ fun DropoffSection(
                         label = "SHIP Departure TIME",
                         value = shipArrivalTime.ifEmpty { "Select time" },
                         onClick = onShipArrivalClick,
+                        icon = Icons.Default.AccessTime,
                         isError = false
                     )
                 }
