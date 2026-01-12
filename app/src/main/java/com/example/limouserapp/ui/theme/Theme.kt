@@ -31,7 +31,7 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun LimouserappTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = false, // Force light mode - dark mode disabled
     // Dynamic color is available on Android 12+
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit

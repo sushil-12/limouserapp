@@ -2,5 +2,6 @@
 <resources>
     <style name="Theme.Limouserapp" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
+        <item name="android:forceDarkAllowed">false</item>
     </style>
 </resources>

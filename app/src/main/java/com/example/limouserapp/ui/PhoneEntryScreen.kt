@@ -67,12 +67,13 @@ fun PhoneEntryScreen(
             text = "Hi Travel partner!",
             style = AppTextStyles.phoneEntryHeadline.copy(color = AppColors.LimoBlack)
         )
+        Spacer(Modifier.height(AppSpacing.sm))
         Text(
             text = "Enter your mobile number",
             style = AppTextStyles.phoneEntryHeadline.copy(color = AppColors.LimoBlack, fontSize = 25.sp)
         )
 
-        Spacer(Modifier.height(AppSpacing.xl))
+        Spacer(Modifier.height(AppSpacing.md))
 
         Text(
             text = "We'll send a verification code on this number.",

@@ -20,6 +20,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Limouserapp"
         android:usesCleartextTraffic="true"
+        android:forceDarkAllowed="false"
         tools:targetApi="28">
         
         <meta-data
