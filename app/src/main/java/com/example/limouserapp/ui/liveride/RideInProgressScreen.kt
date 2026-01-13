@@ -36,8 +36,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.limouserapp.ui.components.LiveRideMapView
+import android.content.res.Configuration
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
@@ -122,11 +124,37 @@ fun RideInProgressScreen(
     )
 
     val ride = uiState.activeRide
+    val isDarkTheme = isSystemInDarkTheme()
+    val backgroundColor = if (isDarkTheme) Color(0xFF121212) else Color.White
+    val surfaceColor = if (isDarkTheme) Color(0xFF1E1E1E) else Color.White
+    val textColor = if (isDarkTheme) Color.White else Color.Black
+    val secondaryTextColor = if (isDarkTheme) Color(0xFFB0B0B0) else Color.Gray
+
     Timber.d("RideInProgressScreen - activeRide: $ride, status: ${ride?.status}")
+
+    // Production-ready loading state with dark theme support
     if (ride == null) {
         Timber.d("RideInProgressScreen - activeRide is null, showing loading")
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(backgroundColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = "Loading ride details...",
+                    color = textColor,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
         }
         return
     }
@@ -142,7 +170,7 @@ fun RideInProgressScreen(
 
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
-        sheetContainerColor = Color.White,
+        sheetContainerColor = surfaceColor, // Dark theme support
         sheetShape = RideInProgressUiTokens.SheetShape,
         sheetShadowElevation = 16.dp,
         sheetPeekHeight = 230.dp,
@@ -162,7 +190,7 @@ fun RideInProgressScreen(
                             Text(
                                 text = bookingNumber,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color.Gray
+                                color = secondaryTextColor // Dark theme support
                             )
                             Spacer(Modifier.height(8.dp))
                             MetricHeader(eta = eta, distance = dist, subTitle = "Thanks for riding with us")
@@ -180,7 +208,7 @@ fun RideInProgressScreen(
                             Text(
                                 text = bookingNumber,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color.Gray
+                                color = secondaryTextColor // Dark theme support
                             )
                             Spacer(Modifier.height(8.dp))
                             MetricHeader(eta = eta, distance = dist, subTitle = "Heading to your destination")
@@ -212,31 +240,31 @@ fun RideInProgressScreen(
                             Text(
                                 text = bookingNumber,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color.Gray
+                                color = secondaryTextColor // Dark theme support
                             )
                             Spacer(Modifier.height(8.dp))
                             MetricHeader(eta = eta, distance = dist, subTitle = "Meet your driver at pickup")
                             Spacer(Modifier.height(24.dp))
 
-                            
+
 
                             // OTP for ride verification
                             Text(
                                 text = "Your 4-digit ride PIN",
-                                color = RideInProgressUiTokens.TextGrey
+                                color = secondaryTextColor // Dark theme support
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "1234",
+                                text = uiState.rideOtp.ifBlank { "1234" },
                                 style = MaterialTheme.typography.headlineMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black
+                                color = textColor // Dark theme support
                             )
                             Spacer(Modifier.height(12.dp))
                             Text(
                                 text = "Provide this OTP to your driver for starting the ride. Do not share OTP on call or message. Please share OTP once you sit in the car.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = RideInProgressUiTokens.TextGrey,
+                                color = secondaryTextColor, // Dark theme support
                                 lineHeight = 16.sp
                             )
                             Spacer(Modifier.height(24.dp))
@@ -261,7 +289,7 @@ fun RideInProgressScreen(
                             Text(
                                 text = bookingNumber,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color.Gray
+                                color = secondaryTextColor // Dark theme support
                             )
                             Spacer(Modifier.height(8.dp))
                             MetricHeader(eta = eta, distance = dist, subTitle = "Picking you up")
@@ -290,8 +318,34 @@ fun RideInProgressScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            Card(modifier = Modifier.fillMaxSize(), shape = RoundedCornerShape(0.dp)) {
-                LiveRideMapView(viewModel = viewModel, modifier = Modifier.fillMaxSize())
+            Card(
+                modifier = Modifier.fillMaxSize(),
+                shape = RoundedCornerShape(0.dp),
+            ) {
+                // Match iOS behavior:
+                // - en_route_pu: active route = driver to pickup, preview route = pickup to dropoff (light grey)
+                // - on_location/en_route_do: active route = pickup to dropoff, no preview
+                val activeRoute = when (uiState.status) {
+                    "en_route_pu" -> uiState.driverToPickupRoute
+                    "on_location", "en_route_do" -> uiState.pickupToDropoffRoute
+                    else -> emptyList()
+                }
+
+                // Preview route: show pickup to dropoff when driver is en route to pickup (matching iOS)
+                val previewRoute = when (uiState.status) {
+                    "en_route_pu" -> uiState.pickupToDropoffRoute
+                    else -> emptyList()
+                }
+
+                Timber.d("🗺️ Map route data - status: ${uiState.status}, activeRoute size: ${activeRoute.size}, previewRoute size: ${previewRoute.size}")
+
+                LiveRideMapView(
+                    viewModel = viewModel,
+                    modifier = Modifier.fillMaxSize(),
+                    activeRoutePolyline = activeRoute,
+                    previewRoutePolyline = previewRoute,
+                    rideStatus = uiState.status // Pass status for camera logic
+                )
             }
             Spacer(modifier = Modifier.statusBarsPadding())
         }
@@ -594,11 +648,55 @@ private enum class RatingType {
     NONE, LIKE, UNLIKE
 }
 
-@Preview(showBackground = true)
+// Production-ready preview without Hilt dependency
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_NO)
 @Composable
-private fun RideInProgressScreenPreview() {
-    Box(modifier = Modifier.background(Color.White)) {
-        Text("Preview not wired (requires Hilt ViewModel)")
+private fun RideInProgressScreenPreviewLight() {
+    MaterialTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.White),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = "Loading ride details...",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun RideInProgressScreenPreviewDark() {
+    MaterialTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF121212)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = "Loading ride details...",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
     }
 }
 

@@ -21,6 +21,11 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // Production-ready: Move secrets to BuildConfig
+        buildConfigField("String", "SOCKET_URL", "\"https://limortservice.infodevbox.com\"")
+        buildConfigField("String", "SOCKET_SECRET", "\"limoapi_notifications_secret_2024_xyz789\"")
+        buildConfigField("String", "GOOGLE_PLACES_API_KEY", "\"AIzaSyDjV38fI9kDAaVJKqEq2sdgLAHXQPC3Up4\"")
     }
 
     buildTypes {

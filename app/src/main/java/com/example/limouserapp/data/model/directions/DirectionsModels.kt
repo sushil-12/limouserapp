@@ -12,7 +12,12 @@ data class DirectionsResponse(
 )
 
 data class Route(
-    @SerializedName("legs") val legs: List<Leg> = emptyList()
+    @SerializedName("legs") val legs: List<Leg> = emptyList(),
+    @SerializedName("overview_polyline") val overviewPolyline: OverviewPolyline? = null
+)
+
+data class OverviewPolyline(
+    @SerializedName("points") val points: String // Encoded polyline string
 )
 
 data class Leg(

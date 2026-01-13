@@ -20,7 +20,10 @@ data class LiveRideUiState(
     val distance: String = "",
     val rideOtp: String = "",
     val pickupArrivalDetected: Boolean = false,
-    val dropoffArrivalDetected: Boolean = false
+    val dropoffArrivalDetected: Boolean = false,
+    val driverToPickupRoute: List<LatLng> = emptyList(),
+    val pickupToDropoffRoute: List<LatLng> = emptyList(),
+    val error: String? = null
 ) {
     val status: String get() = activeRide?.status.orEmpty()
 

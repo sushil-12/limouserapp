@@ -335,13 +335,6 @@ fun TripTimelineView(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = "West Field Cafe, MN",
-                        fontSize = 12.sp,
-                        color = RideInProgressUiTokens.TextGrey,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -352,13 +345,6 @@ fun TripTimelineView(
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                         color = RideInProgressUiTokens.TextBlack,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "West Field Cafe, MN",
-                        fontSize = 12.sp,
-                        color = RideInProgressUiTokens.TextGrey,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

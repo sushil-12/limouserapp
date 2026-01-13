@@ -7,6 +7,8 @@ import com.example.limouserapp.data.model.directions.Leg
 import com.example.limouserapp.data.model.directions.DistanceInfo as DirectionsDistanceInfo
 import com.example.limouserapp.data.model.directions.DurationInfo as DirectionsDurationInfo
 import com.example.limouserapp.data.network.NetworkConfig
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.PolyUtil
 import android.util.Log
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -247,6 +249,79 @@ class DirectionsService @Inject constructor(
             Log.e(TAG, "❌ Route validation request failed: ${e.message}", e)
             // Don't fail validation on network errors - let it pass and show error later
             Pair(true, null)
+        }
+    }
+    
+    /**
+     * Get route polyline between two coordinates
+     * Returns list of LatLng points for drawing on map
+     * @param fromLat Origin latitude
+     * @param fromLng Origin longitude
+     * @param toLat Destination latitude
+     * @param toLng Destination longitude
+     * @return Pair of (route points: List<LatLng>, distance in meters: Int, duration in seconds: Int)
+     */
+    suspend fun getRoutePolyline(
+        fromLat: Double,
+        fromLng: Double,
+        toLat: Double,
+        toLng: Double
+    ): Triple<List<LatLng>, Int, Int> {
+        val origin = "$fromLat,$fromLng"
+        val destination = "$toLat,$toLng"
+        
+        Log.d(TAG, "🗺️ Getting route polyline: Origin=$origin, Destination=$destination")
+        
+        return try {
+            val response = directionsApi.getDirections(
+                origin = origin,
+                destination = destination,
+                waypoints = null,
+                key = NetworkConfig.GOOGLE_PLACES_API_KEY
+            )
+            
+            if (response.status == "OK" && response.routes.isNotEmpty()) {
+                val route = response.routes.first()
+                
+                // Decode polyline
+                val polylinePoints = route.overviewPolyline?.points?.let { encodedPolyline ->
+                    try {
+                        PolyUtil.decode(encodedPolyline)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Error decoding polyline: ${e.message}", e)
+                        emptyList()
+                    }
+                } ?: emptyList()
+                
+                // Calculate total distance and duration
+                var totalDistance = 0
+                var totalDuration = 0
+                route.legs.forEach { leg ->
+                    totalDistance += leg.distance.value
+                    totalDuration += leg.duration.value
+                }
+                
+                Log.d(TAG, "✅ Route polyline decoded: ${polylinePoints.size} points, distance=${totalDistance}m, duration=${totalDuration}s")
+                Triple(polylinePoints, totalDistance, totalDuration)
+            } else {
+                Log.w(TAG, "❌ Directions API error: ${response.status} - ${response.errorMessage}")
+                // Fallback to straight line
+                val fallback = fallbackToStraightLineDistance(fromLat, fromLng, toLat, toLng)
+                val straightLine = listOf(
+                    LatLng(fromLat, fromLng),
+                    LatLng(toLat, toLng)
+                )
+                Triple(straightLine, fallback.first, fallback.second)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error getting route polyline: ${e.message}", e)
+            // Fallback to straight line
+            val fallback = fallbackToStraightLineDistance(fromLat, fromLng, toLat, toLng)
+            val straightLine = listOf(
+                LatLng(fromLat, fromLng),
+                LatLng(toLat, toLng)
+            )
+            Triple(straightLine, fallback.first, fallback.second)
         }
     }
 }
