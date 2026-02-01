@@ -17,10 +17,10 @@ data class Invoice(
     val driverId: Int,
     
     @SerializedName("aff_vehicle_type")
-    val vehicleType: String,
+    val vehicleType: String? = null,
     
     @SerializedName("status")
-    val status: String,
+    val status: String? = null,
     
     @SerializedName("invoice_number")
     val invoiceNumber: Int,
@@ -29,13 +29,13 @@ data class Invoice(
     val reservationPreferencesId: Int?,
     
     @SerializedName("date")
-    val date: String,
+    val date: String? = null,
     
     @SerializedName("pickup_address")
-    val pickupAddress: String,
+    val pickupAddress: String? = null,
     
     @SerializedName("dropoff_address")
-    val dropoffAddress: String,
+    val dropoffAddress: String? = null,
     
     @SerializedName("driver_company")
     val driverCompany: String?,
@@ -56,7 +56,7 @@ data class Invoice(
     val accountEmail: String,
     
     @SerializedName("payment_method")
-    val paymentMethod: String,
+    val paymentMethod: String? = null,
     
     @SerializedName("booking_total")
     val bookingTotal: Double,
@@ -80,10 +80,10 @@ data class Invoice(
     val chargeObjectId: String?,
     
     @SerializedName("driver_name")
-    val driverName: String,
+    val driverName: String? = null,
     
     @SerializedName("driver_phone")
-    val driverPhone: String,
+    val driverPhone: String? = null,
     
     @SerializedName("passenger_name")
     val passengerName: String,
@@ -98,14 +98,13 @@ data class Invoice(
      */
     val formattedDate: String
         get() {
+            val d = date ?: return ""
             return try {
                 val inputFormatter = SimpleDateFormat("MMM dd, yyyy", Locale.US)
-                val dateObj = inputFormatter.parse(date)
-                dateObj?.let {
-                    inputFormatter.format(it)
-                } ?: date
+                val dateObj = inputFormatter.parse(d)
+                dateObj?.let { inputFormatter.format(it) } ?: d
             } catch (e: Exception) {
-                date // Return original if parsing fails
+                d
             }
         }
     
@@ -125,7 +124,7 @@ data class Invoice(
      */
     val statusColor: String
         get() {
-            return when (status.lowercase()) {
+            return when (status?.lowercase()) {
                 "paid" -> "green"
                 "paid_cash" -> "blue"
                 "pending" -> "orange"
@@ -139,12 +138,13 @@ data class Invoice(
      */
     val paymentMethodDisplay: String
         get() {
-            return when (paymentMethod.lowercase()) {
+            val pm = paymentMethod ?: return ""
+            return when (pm.lowercase()) {
                 "credit_card" -> "Credit Card"
                 "cash" -> "Cash"
                 "debit_card" -> "Debit Card"
-                else -> paymentMethod.replaceFirstChar { 
-                    if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() 
+                else -> pm.replaceFirstChar {
+                    if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString()
                 }
             }
         }

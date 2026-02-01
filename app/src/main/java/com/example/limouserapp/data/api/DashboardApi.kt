@@ -207,6 +207,22 @@ interface DashboardApi {
     suspend fun updateUserProfileV1(
         @Body request: com.example.limouserapp.data.model.dashboard.UpdateUserProfileRequest
     ): com.example.limouserapp.data.model.dashboard.UserProfileApiResponse
+
+    /**
+     * Get user FAQ
+     * Endpoint: GET api/user-faq
+     */
+    @GET("api/user-faq")
+    suspend fun getUserFaq(): ApiResponse<com.example.limouserapp.data.model.dashboard.FaqData>
+
+    /**
+     * Get user tutorials
+     * Endpoint: GET api/tutorials?type=user_tutorials
+     */
+    @GET("api/tutorials")
+    suspend fun getUserTutorials(
+        @Query("type") type: String = "user_tutorials"
+    ): ApiResponse<com.example.limouserapp.data.model.dashboard.TutorialData>
 }
 
 /**

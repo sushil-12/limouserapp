@@ -71,6 +71,9 @@ fun DashboardScreen(
     viewModel: DashboardViewModel = hiltViewModel(),
     onNavigateToLiveRide: (bookingId: String?) -> Unit = {},
     onNavigateToNotifications: () -> Unit = {},
+    onNavigateToFaq: () -> Unit = {},
+    onNavigateToTutorials: () -> Unit = {},
+    onViewInvoice: (Int) -> Unit = {},
     initialEditBookingId: Int? = null,
     initialRepeatBookingId: Int? = null,
     initialIsReturnFlow: Boolean = false,
@@ -377,7 +380,7 @@ fun DashboardScreen(
                                     contactDriverName = booking.fullDriverName.ifEmpty { "" }
                                     showContactSheet = true
                                 },
-                                // CRITICAL FIX: Set explicit width for carousel cards
+                                onViewInvoice = onViewInvoice,
                                 modifier = Modifier.fillParentMaxWidth(1f)
                             )
                         }
@@ -425,7 +428,8 @@ fun DashboardScreen(
                 onNavigateToInvoices = { viewModel.closeNavigationDrawer(); onNavigateToInvoices() },
                 onNavigateToInbox = { viewModel.closeNavigationDrawer() },
                 onNavigateToNotifications = { viewModel.closeNavigationDrawer(); onNavigateToNotifications() },
-                onNavigateToHelp = { viewModel.closeNavigationDrawer() },
+                onNavigateToFaq = { viewModel.closeNavigationDrawer(); onNavigateToFaq() },
+                onNavigateToTutorials = { viewModel.closeNavigationDrawer(); onNavigateToTutorials() },
                 onNavigateToDashboard = { openDrawer, isCreateBooking ->
                     viewModel.closeNavigationDrawer()
                     if (isCreateBooking) {

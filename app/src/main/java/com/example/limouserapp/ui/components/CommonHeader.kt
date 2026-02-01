@@ -39,6 +39,7 @@ fun CommonHeader(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars)
             .background(LimoWhite) // iOS systemGray6 equivalent - light gray background
     ) {
         Row(

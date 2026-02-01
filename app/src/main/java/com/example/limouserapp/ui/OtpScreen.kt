@@ -71,18 +71,20 @@ fun OtpScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
 
-    // OTP
+    // OTP - sync with ViewModel state
     var otpValue by remember { mutableStateOf("") }
     val focusRequester = remember { FocusRequester() }
-
-    // Error dialog
-    var showErrorDialog by remember { mutableStateOf(false) }
-    var errorDialogTitle by remember { mutableStateOf("") }
-    var errorDialogMessage by remember { mutableStateOf("") }
 
     // 🔹 RESEND TIMER STATE
     var resendCooldown by remember { mutableIntStateOf(RESEND_INTERVAL_SECONDS) }
     var canResend by remember { mutableStateOf(false) }
+
+    // Sync OTP value with ViewModel state (clears when resend succeeds)
+    LaunchedEffect(uiState.otp) {
+        if (uiState.otp.isEmpty() && otpValue.isNotEmpty()) {
+            otpValue = ""
+        }
+    }
 
     // 🔹 Start resend timer immediately on screen load
     LaunchedEffect(Unit) {
@@ -112,23 +114,25 @@ fun OtpScreen(
     }
 
     LaunchedEffect(uiState.error) {
-        uiState.error?.let { error ->
-            errorDialogTitle = "Error"
-            errorDialogMessage = error
-            showErrorDialog = true
+        uiState.error?.let {
             otpValue = ""
             focusRequester.requestFocus()
         }
     }
 
-    // Auto-submit OTP when 6 digits are entered
+    // Handle OTP changes: clear error and auto-submit
     LaunchedEffect(otpValue) {
+        // Clear error when user starts typing
+        if (otpValue.isNotEmpty() && uiState.error != null) {
+            viewModel.onEvent(OtpUiEvent.ClearError)
+        }
+
+        // Auto-submit when OTP is complete
         if (otpValue.length == 6) {
             // Clear focus and hide keyboard immediately for better UX
             focusManager.clearFocus()
             keyboardController?.hide()
             
-            // Update OTP value and trigger verification
             viewModel.onEvent(OtpUiEvent.OtpChanged(otpValue))
             // Small delay to ensure state is updated before verification
             delay(50)
@@ -218,10 +222,39 @@ fun OtpScreen(
             "(0:${String.format("%02d", resendCooldown)})"
         } else ""
 
+        // Success message display (for resend)
+        uiState.message?.let { message ->
+            Text(
+                text = message,
+                style = TextStyle(
+                    fontFamily = GoogleSansFamily,
+                    fontSize = 14.sp,
+                    color = Color(0xFF059669),
+                    fontWeight = FontWeight.Medium
+                ),
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+        }
+
+        uiState.error?.let { error ->
+            Text(
+                text = error,
+                style = TextStyle(
+                    fontFamily = GoogleSansFamily,
+                    fontSize = 14.sp,
+                    color = Color(0xFFDC2626),
+                    fontWeight = FontWeight.Medium
+                ),
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+        }
+
         // 🔹 RESEND BUTTON
         Surface(
             onClick = {
-                if (canResend) {
+                if (canResend && !uiState.isLoading) {
+                    // Clear OTP immediately when resend is clicked
+                    otpValue = ""
                     viewModel.onEvent(OtpUiEvent.ResendOtp)
 
                     resendCooldown = RESEND_INTERVAL_SECONDS
@@ -238,7 +271,7 @@ fun OtpScreen(
             },
             shape = RoundedCornerShape(12.dp),
             color = Color(0xFFF3F4F6),
-            enabled = canResend
+            enabled = canResend || resendCooldown > 0
         ) {
             Text(
                 text = "Resend code via SMS $timerText",
@@ -252,14 +285,16 @@ fun OtpScreen(
             )
         }
 
+        if (uiState.isLoading) {
+            Spacer(Modifier.height(32.dp))
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    color = LimoOrange
+                )
+            }
+        }
     }
-
-    ErrorAlertDialog(
-        isVisible = showErrorDialog,
-        onDismiss = { showErrorDialog = false },
-        title = errorDialogTitle,
-        message = errorDialogMessage
-    )
 }
 
 @Composable

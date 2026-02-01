@@ -426,13 +426,13 @@ class InvoiceViewModel @Inject constructor(
     
     val paidInvoices: Int
         get() = _uiState.value.invoices.count { 
-            val status = it.status.lowercase()
+            val status = it.status?.lowercase()
             status == "paid" || status == "paid_cash"
         }
     
     val pendingInvoices: Int
         get() = _uiState.value.invoices.count { 
-            it.status.lowercase() == "pending"
+            it.status?.lowercase() == "pending"
         }
 }
 

@@ -5,7 +5,7 @@ package com.example.limouserapp.data.network
  */
 object NetworkConfig {
     const val BASE_URL = "https://1800limoapi.infodevbox.com"
-//     const val BASE_URL = "http://10.99.153.9:8000"
+//     const val BASE_URL = "https://api.1800limo.com"
     const val GOOGLE_PLACES_BASE_URL = "https://maps.googleapis.com"
     
     // Timeout configurations

@@ -67,6 +67,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
+    implementation("androidx.core:core-splashscreen:1.2.0")
     // Needed for ProcessLifecycleOwner (foreground/background tracking)
     implementation("androidx.lifecycle:lifecycle-process:2.7.0")
     

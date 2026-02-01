@@ -83,7 +83,7 @@ fun MyCardsScreen(
             // Fixed Action Buttons at bottom
             // Scaffold automatically applies IME padding to bottomBar, so no manual padding needed
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).imePadding(),
                 color = Color.White,
                 shadowElevation = 8.dp
             ) {
@@ -162,7 +162,6 @@ fun MyCardsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .imePadding() // Adds padding when keyboard is visible - this prevents content from being hidden
                 .verticalScroll(scrollState)
         ) {
             // 1. Saved Cards Section

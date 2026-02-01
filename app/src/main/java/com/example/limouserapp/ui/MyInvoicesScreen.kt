@@ -171,7 +171,7 @@ fun MyInvoicesScreen(
                                     onViewInvoiceSummary = { onViewInvoiceSummary(invoice.invoiceNumber) },
                                     onDriverPhoneClick = { phoneNumber ->
                                         contactPhoneNumber = phoneNumber
-                                        contactDriverName = invoice.driverName
+                                        contactDriverName = invoice.driverName.orEmpty()
                                         showContactSheet = true
                                     }
                                 )

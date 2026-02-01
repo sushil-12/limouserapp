@@ -1,0 +1,45 @@
+{
+  "sites": [
+    {
+      "id": "ixc_chandigarh",
+      "name": "Chandigarh International Airport",
+      "code": "IXC",
+      "type": "airport",
+      "boundingBox": {
+        "northeast": {
+          "lat": 30.6900,
+          "lng": 76.8000
+        },
+        "southwest": {
+          "lat": 30.6700,
+          "lng": 76.7800
+        }
+      },
+      "polygon": [
+        {"lat": 30.6900, "lng": 76.7800},
+        {"lat": 30.6900, "lng": 76.8000},
+        {"lat": 30.6700, "lng": 76.8000},
+        {"lat": 30.6700, "lng": 76.7800}
+      ],
+      "terminalPOIs": [
+        {
+          "id": "terminal_1_curb",
+          "name": "Terminal 1 Curb",
+          "entranceName": "Entrance A",
+          "lat": 30.6800,
+          "lng": 76.7900,
+          "description": "Arrived at Terminal — meet at Entrance A (follow signs)"
+        },
+        {
+          "id": "terminal_2_curb",
+          "name": "Terminal 2 Curb",
+          "entranceName": "Entrance B",
+          "lat": 30.6750,
+          "lng": 76.7850,
+          "description": "Arrived at Terminal — meet at Entrance B (follow signs)"
+        }
+      ],
+      "preferredPOI": "terminal_1_curb"
+    }
+  ]
+}

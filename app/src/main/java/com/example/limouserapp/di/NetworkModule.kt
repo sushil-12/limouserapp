@@ -164,6 +164,18 @@ object NetworkModule {
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
     }
+
+    /**
+     * Provide Google Roads API (snapToRoads)
+     * Roads API is hosted on the same base URL as Places
+     */
+    @Provides
+    @Singleton
+    fun provideGoogleRoadsApi(
+        @Named("places") retrofit: Retrofit
+    ): com.example.limouserapp.data.api.GoogleRoadsApi {
+        return retrofit.create(com.example.limouserapp.data.api.GoogleRoadsApi::class.java)
+    }
     
     /**
      * Provide AuthApi

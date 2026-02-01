@@ -50,7 +50,8 @@ fun NavigationDrawer(
     onNavigateToInbox: () -> Unit = {},
     onNavigateToCreateBooking: () -> Unit = {},
     onNavigateToNotifications: () -> Unit = {},
-    onNavigateToHelp: () -> Unit = {},
+    onNavigateToFaq: () -> Unit = {},
+    onNavigateToTutorials: () -> Unit = {},
     onNavigateToDashboard: (openDrawer: Boolean, isCreateBooking: Boolean) -> Unit = { _, _ -> },
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
@@ -160,10 +161,18 @@ fun NavigationDrawer(
                         )
                         
                         UserMenuOption(
-                            title = "Help",
+                            title = "FAQ",
                             onClick = {
                                 onClose()
-                                onNavigateToHelp()
+                                onNavigateToFaq()
+                            }
+                        )
+
+                        UserMenuOption(
+                            title = "Tutorials",
+                            onClick = {
+                                onClose()
+                                onNavigateToTutorials()
                             }
                         )
                         
@@ -175,6 +184,12 @@ fun NavigationDrawer(
                                 onLogout()
                                 onClose()
                             }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(60.dp)
+                                .background(LimoWhite)
                         )
                     }
                     
@@ -390,7 +405,7 @@ private fun UserLogoutOption(
         modifier = modifier
             .fillMaxWidth()
             .clickable { onClick() }
-            .padding(vertical = 24.dp),
+            .padding(vertical = 32.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

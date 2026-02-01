@@ -20,13 +20,17 @@ data class LiveRideUiState(
     val distance: String = "",
     val rideOtp: String = "",
     val pickupArrivalDetected: Boolean = false,
-    val dropoffArrivalDetected: Boolean = false
+    val dropoffArrivalDetected: Boolean = false,
+    val routePolyline: List<LatLng> = emptyList(),
+    val coveredPath: List<LatLng> = emptyList(),
+    val driverHeading: Float? = null,
+    val airportMessage: String? = null
 ) {
     val status: String get() = activeRide?.status.orEmpty()
 
     val isEnRouteToPickup: Boolean get() = status == "en_route_pu"
     val isArrivedAtPickup: Boolean get() = status == "on_location"
-    val isRideStarted: Boolean get() = status == "en_route_do"
+    val isRideStarted: Boolean get() = status == "en_route_do" || status == "started" || status == "ride_in_progress"
     val isRideEnded: Boolean get() = status == "ended"
 }
 

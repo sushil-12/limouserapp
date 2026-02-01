@@ -3,6 +3,9 @@ package com.example.limouserapp.data.service
 import com.example.limouserapp.data.api.BookingApi
 import com.example.limouserapp.data.model.booking.CreateReservationRequest
 import com.example.limouserapp.data.model.booking.CreateReservationResponse
+import com.example.limouserapp.data.model.booking.DriverFeedbackRequest
+import com.example.limouserapp.data.model.booking.DriverFeedbackResponse
+import com.example.limouserapp.data.model.booking.GenerateRideOTPResponse
 import javax.inject.Inject
 import javax.inject.Singleton
 import android.util.Log
@@ -51,6 +54,36 @@ class BookingService @Inject constructor(
         Log.e(DebugTags.BookingProcess, "Exception Type: ${e.javaClass.simpleName}")
         e.printStackTrace()
         Log.e(DebugTags.BookingProcess, "===========================================")
+        Result.failure(e)
+    }
+    
+    suspend fun generateRideOTP(bookingId: Int): Result<GenerateRideOTPResponse> = try {
+        val response = api.generateRideOTP(bookingId)
+        if (response.success && response.data != null) {
+            Result.success(response.data)
+        } else {
+            Result.failure(Exception(response.message ?: "Failed to generate OTP"))
+        }
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+    
+    suspend fun submitDriverFeedback(
+        bookingId: Int,
+        rating: Int,
+        feedback: String?
+    ): Result<DriverFeedbackResponse> = try {
+        val request = DriverFeedbackRequest(
+            rating = rating,
+            feedback = feedback
+        )
+        val response = api.submitDriverFeedback(bookingId, request)
+        if (response.success && response.data != null) {
+            Result.success(response.data)
+        } else {
+            Result.failure(Exception(response.message ?: "Failed to submit feedback"))
+        }
+    } catch (e: Exception) {
         Result.failure(e)
     }
 }

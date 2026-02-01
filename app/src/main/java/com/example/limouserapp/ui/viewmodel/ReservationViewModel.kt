@@ -398,7 +398,7 @@ class ReservationViewModel @Inject constructor(
                             ride.pickupLat, ride.pickupLong, 
                             ride.destinationLat, ride.destinationLong,
                             waypoints
-                        )
+                        ) ?: Pair(0, 0)
                         Log.d(DebugTags.BookingProcess, "📏 RECALCULATED DISTANCE: ${result.first} meters (with ${waypoints?.size ?: 0} waypoints)")
                         Log.d(DebugTags.BookingProcess, "⏱️ RECALCULATED DURATION: ${result.second} seconds")
                         result
@@ -433,7 +433,7 @@ class ReservationViewModel @Inject constructor(
                             returnPickupLatToUse, returnPickupLongToUse,
                             returnDropoffLatToUse, returnDropoffLongToUse,
                             returnWaypoints
-                        )
+                        ) ?: Pair(0, 0)
                         Log.d(DebugTags.BookingProcess, "📏 RECALCULATED RETURN DISTANCE: ${result.first} meters (with ${returnWaypoints?.size ?: 0} waypoints)")
                         Log.d(DebugTags.BookingProcess, "⏱️ RECALCULATED RETURN DURATION: ${result.second} seconds")
                         result
@@ -672,7 +672,7 @@ class ReservationViewModel @Inject constructor(
                     directionsService.calculateDistance(
                         ride.pickupLat, ride.pickupLong, 
                         ride.destinationLat, ride.destinationLong
-                    )
+                    ) ?: Pair(0, 0)
                 } else {
                     Pair(0, 0)
                 }
@@ -682,7 +682,7 @@ class ReservationViewModel @Inject constructor(
                     directionsService.calculateDistance(
                         ride.destinationLat, ride.destinationLong,
                         ride.pickupLat, ride.pickupLong
-                    )
+                    ) ?: Pair(0, 0)
                 } else {
                     Pair(0, 0)
                 }
@@ -1320,7 +1320,7 @@ class ReservationViewModel @Inject constructor(
                     directionsService.calculateDistance(
                         ride.pickupLat, ride.pickupLong, 
                         ride.destinationLat, ride.destinationLong
-                    )
+                    ) ?: Pair(0, 0)
                 } else {
                     Pair(0, 0)
                 }
@@ -1330,7 +1330,7 @@ class ReservationViewModel @Inject constructor(
                     directionsService.calculateDistance(
                         ride.destinationLat, ride.destinationLong,
                         ride.pickupLat, ride.pickupLong
-                    )
+                    ) ?: Pair(0, 0)
                 } else {
                     Pair(0, 0)
                 }

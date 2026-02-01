@@ -243,6 +243,40 @@ class DashboardRepository @Inject constructor(
     }
     
     /**
+     * Get user FAQ
+     * API: GET api/user-faq
+     */
+    suspend fun getFaq(): Result<FaqData> {
+        return try {
+            val response = dashboardApi.getUserFaq()
+            if (response.success && response.data != null) {
+                Result.success(response.data)
+            } else {
+                Result.failure(Exception(response.message ?: "Failed to load FAQs"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Get user tutorials
+     * API: GET api/tutorials?type=user_tutorials
+     */
+    suspend fun getTutorials(): Result<TutorialData> {
+        return try {
+            val response = dashboardApi.getUserTutorials()
+            if (response.success && response.data != null) {
+                Result.success(response.data)
+            } else {
+                Result.failure(Exception(response.message ?: "Failed to load tutorials"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Get booking audit records (notifications)
      */
     suspend fun getBookingAuditRecords(

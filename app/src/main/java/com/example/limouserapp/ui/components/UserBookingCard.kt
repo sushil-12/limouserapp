@@ -1,23 +1,33 @@
 package com.example.limouserapp.ui.components
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Sms
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -25,71 +35,104 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.example.limouserapp.data.model.dashboard.UserBooking
 import com.example.limouserapp.ui.theme.LimoBlack
 import com.example.limouserapp.ui.theme.LimoGreen
-import com.example.limouserapp.ui.theme.LimoGrey
 import com.example.limouserapp.ui.theme.LimoOrange
 import com.example.limouserapp.ui.theme.LimoRed
 import com.example.limouserapp.ui.theme.LimoWhite
 import com.example.limouserapp.ui.utils.BookingFormatter
+import kotlinx.coroutines.launch
 
-// Define specific neutral colors to avoid the "Pink/Purple" Material 3 tint
+// Match driver DynamicBookingCard colors and layout
+private val IOSBlack = Color(0xFF000000)
+private val IOSLightGray = Color(0xFFE6E6E6)
+private val IOSPassengerBg = Color(0xFFF2F2F2)
 private val CardBackgroundWhite = Color.White
-private val SectionBackgroundGray = Color(0xFFF5F5F5) // Light Gray for Summary
-private val DriverBackgroundGray = Color(0xFFFAFAFA)  // Very Light Gray for Driver
-private val TimelineColor = Color.Black
-private val TimelineLineColor = Color.LightGray
+private val Blue = Color(0xFF0474CF)
+
+// Bottom sheet design (same as driver)
+private val NavyBlue = Color(0xFF0F2E53)
+private val AlertRed = Color(0xFF8B3A3A)
+private val TextBlack = Color(0xFF1A1A1A)
+private val SurfaceBg = Color(0xFFF9F9F9)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UserBookingCard(
     booking: UserBooking,
+    onClick: (() -> Unit)? = null,
     onEditBooking: (() -> Unit)? = null,
     onCancelBooking: (() -> Unit)? = null,
     onRepeatBooking: (() -> Unit)? = null,
     onReturnBooking: (() -> Unit)? = null,
     onDriverPhoneClick: ((String) -> Unit)? = null,
+    onChatClick: ((Int) -> Unit)? = null,
+    onViewInvoice: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val cardStyle = remember(booking.bookingStatus) {
-        getCardStyleForStatus(booking.bookingStatus)
-    }
+    var showBottomSheet by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
 
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
+            ),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = CardBackgroundWhite),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.2f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column {
-            // 1. Top Header
-            TopHeaderView(booking, cardStyle)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // 1. Top Header (same as driver: black, date/time left, service badge right)
+            TopHeaderView(booking)
 
-            // 2. Booking Summary
-            BookingSummaryView(booking, cardStyle)
+            // 2. Booking Summary (same as driver: gray, #id, status center, Total + orange pill)
+            BookingSummaryView(booking)
 
-            // 3. Route Details (Fixed Timeline)
+            // 3. Route Details (same as driver: timeline + addresses)
             RouteDetailsView(booking)
 
-            // 4. Driver Information
-            DriverInfoView(booking, onDriverPhoneClick)
+            // 4. Driver row (same as driver PAX row: tap opens bottom sheet)
+            DriverInfoView(
+                booking = booking,
+                onDriverPhoneClick = onDriverPhoneClick,
+                onOpenBottomSheet = { showBottomSheet = true }
+            )
 
-            // 5. Action Buttons
+            // 5. Action Buttons (unchanged)
             ActionButtonsView(
                 booking = booking,
                 onEditBooking = onEditBooking,
                 onCancelBooking = onCancelBooking,
                 onRepeatBooking = onRepeatBooking,
-                onReturnBooking = onReturnBooking
+                onReturnBooking = onReturnBooking,
+                onViewInvoice = onViewInvoice
             )
         }
+    }
+
+    if (showBottomSheet) {
+        BookingActionBottomSheet(
+            booking = booking,
+            sheetState = sheetState,
+            onDismiss = {
+                scope.launch {
+                    sheetState.hide()
+                    showBottomSheet = false
+                }
+            },
+            onChatClick = onChatClick
+        )
     }
 }
 
 @Composable
-private fun TopHeaderView(booking: UserBooking, style: BookingCardStyle) {
+private fun TopHeaderView(booking: UserBooking) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(style.headerBackgroundColor)
+            .background(IOSBlack)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -101,130 +144,154 @@ private fun TopHeaderView(booking: UserBooking, style: BookingCardStyle) {
             Icon(
                 imageVector = Icons.Default.Schedule,
                 contentDescription = null,
-                tint = style.accentColor,
-                modifier = Modifier.size(18.dp)
+                tint = LimoOrange,
+                modifier = Modifier.size(16.dp)
             )
-            Text(
-                text = BookingFormatter.formatBookingTime(booking.pickupDate, booking.pickupTime),
-                style = MaterialTheme.typography.labelLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+            Column(verticalArrangement = Arrangement.Center) {
+                Text(
+                    text = BookingFormatter.formatDate(booking.pickupDate),
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
                 )
-            )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = BookingFormatter.formatTime(booking.pickupTime),
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
         }
 
-        // Service Badge
         Surface(
-            color = CardBackgroundWhite,
-            shape = RoundedCornerShape(4.dp),
+            color = LimoWhite,
+            shape = RoundedCornerShape(6.dp)
         ) {
             Text(
                 text = "${BookingFormatter.formatServiceType(booking.serviceType)} / ${BookingFormatter.formatTransferType(booking.transferType ?: "")}",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = LimoBlack
-                ),
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.Black,
+                maxLines = 1
             )
         }
     }
 }
 
 @Composable
-private fun BookingSummaryView(booking: UserBooking, style: BookingCardStyle) {
+private fun BookingSummaryView(booking: UserBooking) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            // FIX: Use explicit Light Gray, not SurfaceVariant
-            .background(SectionBackgroundGray)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+            .background(IOSLightGray)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = "#${booking.bookingId}",
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.Black,
+            maxLines = 1
         )
 
-        Text(
-            text = booking.statusDisplayText,
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontWeight = FontWeight.Bold,
-                color = BookingFormatter.getBookingStatusColor(booking.bookingStatus)
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = booking.statusDisplayText,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = BookingFormatter.getBookingStatusColor(booking.bookingStatus),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-        )
+        }
 
-        Text(
-            text = "Total: ${booking.formattedTotal}",
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Total",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.Black
+            )
+            Surface(color = LimoOrange, shape = RoundedCornerShape(8.dp)) {
+                Text(
+                    text = booking.formattedTotal,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = LimoWhite,
+                    maxLines = 1
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun RouteDetailsView(booking: UserBooking) {
-    // FIX: IntrinsicSize.Min is crucial here.
-    // It forces the Row to be exactly as tall as the text, allowing the line
-    // to connect the dots perfectly from top to bottom.
+    var pickupLineCount by remember { mutableStateOf(1) }
+    val connectorHeight = if (pickupLineCount > 1) 40.dp else 20.dp
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(CardBackgroundWhite)
-            .height(IntrinsicSize.Min)
-            .padding(all = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // --- Timeline Visual ---
-        Column(
-            modifier = Modifier.width(16.dp).fillMaxHeight(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            // 1. Pickup Circle
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Box(
                 modifier = Modifier
-                    .size(10.dp)
+                    .size(12.dp)
                     .clip(CircleShape)
-                    .background(TimelineColor)
+                    .background(IOSBlack)
             )
-
-            // 2. Connecting Line (Fills remaining space)
             Box(
                 modifier = Modifier
-                    .width(1.dp)
-                    .weight(1f) // Stretches to fill space between dots
-                    .background(TimelineLineColor)
+                    .width(2.dp)
+                    .height(connectorHeight)
+                    .background(IOSBlack)
             )
-
-            // 3. Dropoff Square
             Box(
                 modifier = Modifier
-                    .size(10.dp)
-                    .clip(RoundedCornerShape(2.dp)) // Square with slight radius
-                    .background(TimelineColor)
+                    .size(12.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(IOSBlack)
             )
         }
 
-        // --- Addresses ---
         Column(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            verticalArrangement = Arrangement.SpaceBetween
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Pickup Address (Top aligned with Circle)
             Text(
                 text = booking.pickupAddress,
-                style = MaterialTheme.typography.bodyMedium,
-                color = LimoBlack,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.Black,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(bottom = 12.dp) // Gap between addresses
+                onTextLayout = { textLayoutResult: TextLayoutResult ->
+                    pickupLineCount = textLayoutResult.lineCount
+                }
             )
-
-            // Dropoff Address (Bottom aligned with Square)
             Text(
                 text = booking.dropoffAddress,
-                style = MaterialTheme.typography.bodyMedium,
-                color = LimoBlack,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.Black,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
@@ -235,67 +302,61 @@ private fun RouteDetailsView(booking: UserBooking) {
 @Composable
 private fun DriverInfoView(
     booking: UserBooking,
-    onDriverPhoneClick: ((String) -> Unit)?
+    onDriverPhoneClick: ((String) -> Unit)?,
+    onOpenBottomSheet: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            // FIX: Very light gray background to separate from Route but keep it clean
-            .background(DriverBackgroundGray)
+            .background(IOSPassengerBg)
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Avatar Circle
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(Color.White)
-                .border(1.dp, Color.LightGray, CircleShape),
-            contentAlignment = Alignment.Center
+        Text(
+            text = "Driver",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color.Gray
+        )
+        Surface(
+            color = CardBackgroundWhite,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { onOpenBottomSheet() }
         ) {
-            Icon(
-                imageVector = Icons.Outlined.Person,
-                contentDescription = "Driver",
-                tint = Color.Gray,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-
-        // Info
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = booking.fullDriverName.ifEmpty { "Pending Assignment" },
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                color = LimoBlack
-            )
-
-            if (booking.formattedDriverPhone.isNotEmpty()) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text(
-                    text = booking.formattedDriverPhone,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray,
+                    text = booking.fullDriverName.ifEmpty { "Pending Assignment" },
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Box(
                     modifier = Modifier
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onDriverPhoneClick?.invoke(booking.formattedDriverPhone) }
-                        .padding(top = 2.dp)
+                        .width(1.dp)
+                        .height(18.dp)
+                        .background(Color.Gray.copy(alpha = 0.3f))
+                )
+                Text(
+                    text = booking.formattedDriverPhone.ifEmpty { "—" },
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Blue,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
-
-        // Optional Affiliate Badge (if needed)
-//        if (booking.companyName.isNotEmpty()) {
-            booking.companyName?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray
-                )
-            }
-//        }
+        Spacer(modifier = Modifier.weight(1f))
     }
 }
 
@@ -305,10 +366,13 @@ private fun ActionButtonsView(
     onEditBooking: (() -> Unit)? = null,
     onCancelBooking: (() -> Unit)? = null,
     onRepeatBooking: (() -> Unit)? = null,
-    onReturnBooking: (() -> Unit)? = null
+    onReturnBooking: (() -> Unit)? = null,
+    onViewInvoice: ((Int) -> Unit)? = null
 ) {
     val paymentStatus = booking.paymentStatus.lowercase()
-    val isPaid = paymentStatus == "paid" || paymentStatus == "paid_cash"
+    // View Invoice only for paid or paid_cash
+    val showViewInvoice = paymentStatus == "paid" || paymentStatus == "paid_cash"
+    val isPaid = showViewInvoice
 
     // White background for actions
     Column(
@@ -404,20 +468,20 @@ private fun ActionButtonsView(
                     }
                 }
             }
-        } else {
+        } else if (showViewInvoice) {
+            // Paid/paid_cash only: View Invoice + More
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp), // Gap between Invoice and More
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 1. View Invoice Button
-                // FIX: Use .weight(1f) so it shares space with the More button
+                // 1. View Invoice Button (only for paid or paid_cash)
                 Button(
-                    onClick = { /* Handle invoice click */ },
+                    onClick = { onViewInvoice?.invoke(booking.bookingId) },
                     colors = ButtonDefaults.buttonColors(containerColor = LimoGreen),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier
-                        .weight(1f) // <--- CRITICAL FIX: Fills available width
+                        .weight(1f)
                         .height(40.dp),
                     contentPadding = PaddingValues(0.dp)
                 ) {
@@ -478,31 +542,239 @@ private fun ActionButtonsView(
     }
 }
 
-// --- Helper Data Class ---
+// --- Booking Action Bottom Sheet (same design as driver DynamicBookingCard) ---
 
-private data class BookingCardStyle(
-    val headerBackgroundColor: Color,
-    val accentColor: Color
-)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BookingActionBottomSheet(
+    booking: UserBooking,
+    sheetState: SheetState,
+    onDismiss: () -> Unit,
+    onChatClick: ((Int) -> Unit)? = null
+) {
+    val context = LocalContext.current
 
-private fun getCardStyleForStatus(status: String): BookingCardStyle {
-    return when (status.lowercase()) {
-        "completed", "finished" -> BookingCardStyle(
-            headerBackgroundColor = Color(0xFF2E7D32), // Green
-            accentColor = Color.White
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        containerColor = SurfaceBg,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 12.dp)
+                    .width(40.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.Gray.copy(alpha = 0.3f))
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 40.dp)
+        ) {
+            // Header: Booking #id, driver name, Report Issue
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Booking #${booking.bookingId}",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = NavyBlue
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = booking.fullDriverName.ifEmpty { "Pending Assignment" },
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = TextBlack
+                    )
+                    Text(
+                        text = "Driver",
+                        fontSize = 14.sp,
+                        color = Color.Gray
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("mailto:")
+                            putExtra(Intent.EXTRA_EMAIL, arrayOf("info@1800limo.com"))
+                            putExtra(Intent.EXTRA_SUBJECT, "Issue - Booking #${booking.bookingId}")
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Send email"))
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, AlertRed),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Warning,
+                        contentDescription = null,
+                        tint = AlertRed,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Report Issue",
+                        fontSize = 12.sp,
+                        color = AlertRed,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Section: Driver Communication
+            BookingSectionLabel(text = "Driver Communication")
+            Spacer(modifier = Modifier.height(16.dp))
+
+            val driverPhone = booking.formattedDriverPhone
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                BookingPrimaryActionButton(
+                    text = "Call Driver",
+                    icon = Icons.Outlined.Call,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        if (driverPhone.isNotEmpty()) {
+                            val intent = Intent(Intent.ACTION_DIAL).apply {
+                                data = Uri.parse("tel:${driverPhone.filter { it.isDigit() || it == '+' }}")
+                            }
+                            context.startActivity(intent)
+                        }
+                    }
+                )
+
+                BookingPrimaryActionButton(
+                    text = "Chat Driver",
+                    icon = Icons.Outlined.Chat,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        onChatClick?.invoke(booking.bookingId)
+                            ?: run {
+                                // Fallback: open SMS to driver if no chat handler
+                                if (driverPhone.isNotEmpty()) {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$driverPhone"))
+                                    )
+                                }
+                            }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Section: Admin Support
+            BookingSectionLabel(text = "Admin Support")
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                BookingPrimaryActionButton(
+                    text = "Call Admin",
+                    icon = Icons.Outlined.Call,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        context.startActivity(
+                            Intent(Intent.ACTION_DIAL, Uri.parse("tel:17082056607"))
+                        )
+                    }
+                )
+                BookingPrimaryActionButton(
+                    text = "Text Admin",
+                    icon = Icons.Outlined.Sms,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        context.startActivity(
+                            Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:17082056607")))
+                    }
+                )
+                BookingPrimaryActionButton(
+                    text = "Email Admin",
+                    icon = Icons.Outlined.Email,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        context.startActivity(
+                            Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:info@1800limo.com"))
+                        )
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookingPrimaryActionButton(
+    text: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(50.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = NavyBlue,
+            contentColor = Color.White
+        ),
+        contentPadding = PaddingValues(horizontal = 8.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(20.dp)
         )
-        "cancelled" -> BookingCardStyle(
-            headerBackgroundColor = LimoRed,
-            accentColor = Color.White
-        )
-        else -> BookingCardStyle(
-            headerBackgroundColor = LimoBlack,
-            accentColor = LimoOrange
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = text,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
         )
     }
 }
 
-// ... (Paste this at the bottom of the file) ...
+@Composable
+private fun BookingSectionLabel(text: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = text,
+            fontSize = 14.sp,
+            color = Color.Gray,
+            fontWeight = FontWeight.Normal
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            thickness = 1.dp,
+            color = Color.Gray.copy(alpha = 0.2f)
+        )
+    }
+}
+
+// --- Previews ---
 
 @Preview(showBackground = true, backgroundColor = 0xFFFFFFFF)
 @Composable

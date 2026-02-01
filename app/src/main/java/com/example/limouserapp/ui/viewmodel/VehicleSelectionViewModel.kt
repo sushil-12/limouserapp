@@ -123,7 +123,7 @@ class VehicleSelectionViewModel @Inject constructor(
         // Use Google Maps Directions API for accurate road distance and duration
         val (distanceMeters, durationSeconds) = directionsService.calculateDistance(
             pickupLat, pickupLong, dropoffLat, dropoffLong
-        )
+        ) ?: Pair(0, 0)
         
         // Format distance and duration
         val (distanceText, _) = directionsService.formatDistance(distanceMeters)

@@ -477,7 +477,7 @@ fun TripDetailsSection(
                     val (distanceMeters, durationSeconds) = directionsService.calculateDistance(
                         rideData.pickupLat!!, rideData.pickupLong!!,
                         rideData.destinationLat!!, rideData.destinationLong!!
-                    )
+                    ) ?: Pair(0, 0)
 
                     onDistanceCalculated?.invoke(distanceMeters.toDouble(), durationSeconds)
 

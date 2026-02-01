@@ -376,6 +376,7 @@ fun AddCreditCardScreen(
                     focusedBorderColor = if (cardNumberError != null) Color.Red else Color(0xFF121212).copy(alpha = 0.1f),
                     unfocusedBorderColor = if (cardNumberError != null) Color.Red else Color(0xFF121212).copy(alpha = 0.1f),
                     focusedContainerColor = Color(0xFFF5F5F5),
+                    errorContainerColor = Color(0xFFF5F5F5),
                     unfocusedContainerColor = Color(0xFFF5F5F5),
                     cursorColor = Color(0xFF121212),
                     errorBorderColor = Color.Red
@@ -475,6 +476,7 @@ fun AddCreditCardScreen(
                         focusedBorderColor = if (expiryDateError != null) Color.Red else Color(0xFF121212).copy(alpha = 0.1f),
                         unfocusedBorderColor = if (expiryDateError != null) Color.Red else Color(0xFF121212).copy(alpha = 0.1f),
                         focusedContainerColor = Color(0xFFF5F5F5),
+                        errorContainerColor = Color(0xFFF5F5F5),
                         unfocusedContainerColor = Color(0xFFF5F5F5),
                         cursorColor = Color(0xFF121212),
                         errorBorderColor = Color.Red
@@ -554,6 +556,7 @@ fun AddCreditCardScreen(
                         focusedBorderColor = if (cvvError != null) Color.Red else Color(0xFF121212).copy(alpha = 0.1f),
                         unfocusedBorderColor = if (cvvError != null) Color.Red else Color(0xFF121212).copy(alpha = 0.1f),
                         focusedContainerColor = Color(0xFFF5F5F5),
+                        errorContainerColor = Color(0xFFF5F5F5),
                         unfocusedContainerColor = Color(0xFFF5F5F5),
                         cursorColor = Color(0xFF121212),
                         errorBorderColor = Color.Red
@@ -637,6 +640,7 @@ fun AddCreditCardScreen(
                     focusedBorderColor = if (nameOnCardError != null) Color.Red else Color(0xFF121212).copy(alpha = 0.1f),
                     unfocusedBorderColor = if (nameOnCardError != null) Color.Red else Color(0xFF121212).copy(alpha = 0.1f),
                     focusedContainerColor = Color(0xFFF5F5F5),
+                    errorContainerColor = Color(0xFFF5F5F5),
                     unfocusedContainerColor = Color(0xFFF5F5F5),
                     cursorColor = Color(0xFF121212),
                     errorBorderColor = Color.Red
@@ -785,6 +789,7 @@ fun AddCreditCardScreen(
                     focusedBorderColor = if (postalCodeError != null) Color.Red else Color(0xFF121212).copy(alpha = 0.1f),
                     unfocusedBorderColor = if (postalCodeError != null) Color.Red else Color(0xFF121212).copy(alpha = 0.1f),
                     focusedContainerColor = Color(0xFFF5F5F5),
+                    errorContainerColor = Color(0xFFF5F5F5),
                     unfocusedContainerColor = Color(0xFFF5F5F5),
                     cursorColor = Color(0xFF121212),
                     errorBorderColor = Color.Red

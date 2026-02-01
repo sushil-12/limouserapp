@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.limouserapp.data.socket.ActiveRide
 import com.example.limouserapp.data.socket.DriverLocationUpdate
 import com.example.limouserapp.data.socket.SocketService
+import com.example.limouserapp.data.service.DirectionsService
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
@@ -15,7 +16,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import javax.inject.Inject
-import timber.log.Timber
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
@@ -27,7 +27,11 @@ import kotlin.math.sqrt
  */
 @HiltViewModel
 class LiveRideViewModel @Inject constructor(
-    private val socketService: SocketService
+    private val socketService: SocketService,
+    private val directionsService: DirectionsService,
+    private val bookingService: com.example.limouserapp.data.service.BookingService,
+    private val airportCampusService: com.example.limouserapp.data.service.AirportCampusService,
+    private val roadsSnappingService: com.example.limouserapp.data.service.RoadsSnappingService
 ) : ViewModel() {
     
     // Live Ride Data
@@ -57,12 +61,28 @@ class LiveRideViewModel @Inject constructor(
     private val _rideOTP = MutableStateFlow("")
     val rideOTP: StateFlow<String> = _rideOTP.asStateFlow()
     
-    // Estimated time and distance
+    // OTP generation state
+    private val _isGeneratingOTP = MutableStateFlow(false)
+    val isGeneratingOTP: StateFlow<Boolean> = _isGeneratingOTP.asStateFlow()
+    
+    private val _otpError = MutableStateFlow<String?>(null)
+    val otpError: StateFlow<String?> = _otpError.asStateFlow()
+    
+    // Track last status to detect changes
+    private var lastStatus: String? = null
+    private var otpGeneratedForBooking: Int? = null
+    
+    // Estimated time and distance (preserve last valid values)
     private val _estimatedTime = MutableStateFlow("Calculating...")
     val estimatedTime: StateFlow<String> = _estimatedTime.asStateFlow()
     
-    private val _distance = MutableStateFlow("...")
+    private val _distance = MutableStateFlow("Calculating...")
     val distance: StateFlow<String> = _distance.asStateFlow()
+    
+    // Track if we have valid route data
+    private var hasValidRouteData = false
+    private var lastValidDistance: String? = null
+    private var lastValidETA: String? = null
     
     // Status flags
     private val _isDriverOnLocation = MutableStateFlow(false)
@@ -74,6 +94,40 @@ class LiveRideViewModel @Inject constructor(
 
     private val _dropoffArrivalDetected = MutableStateFlow(false)
     val dropoffArrivalDetected: StateFlow<Boolean> = _dropoffArrivalDetected.asStateFlow()
+    
+    // Route polyline for map display (full route)
+    private val _routePolyline = MutableStateFlow<List<LatLng>>(emptyList())
+    val routePolyline: StateFlow<List<LatLng>> = _routePolyline.asStateFlow()
+    
+    // Covered path (traveled portion of route)
+    private val _coveredPath = MutableStateFlow<List<LatLng>>(emptyList())
+    val coveredPath: StateFlow<List<LatLng>> = _coveredPath.asStateFlow()
+    
+    // Driver heading/bearing for marker rotation
+    private val _driverHeading = MutableStateFlow<Float?>(null)
+    val driverHeading: StateFlow<Float?> = _driverHeading.asStateFlow()
+    
+    // Route state persistence
+    private var lastValidRoute: List<LatLng>? = null
+    private var lastValidRouteOrigin: LatLng? = null
+    private var lastValidRouteDestination: LatLng? = null
+    private var lastValidRouteTimestamp: Long = 0L
+    private var lastValidETASeconds: Int? = null
+    private var lastValidDistanceMeters: Int? = null
+    
+    // ETA smoothing (Exponential Moving Average)
+    private var smoothedETA: Double? = null
+    private val etaSmoothingAlpha = 0.3 // EMA smoothing factor
+
+    // Airport/Campus detection
+    private val _airportMessage = MutableStateFlow<String?>(null)
+    val airportMessage: StateFlow<String?> = _airportMessage.asStateFlow()
+    private var currentAirportSite: com.example.limouserapp.data.model.location.Site? = null
+
+    // Monotonic progress tracking
+    private var lastProgressMeters: Double = 0.0
+    private val progressBackstepThreshold = 50.0 // meters - allow large intentional reversals
+    private var projectionBackstepCount = 0
 
     /**
      * Single source of truth (optimized): collect one uiState in Compose.
@@ -88,7 +142,11 @@ class LiveRideViewModel @Inject constructor(
         distance,
         rideOTP,
         pickupArrivalDetected,
-        dropoffArrivalDetected
+        dropoffArrivalDetected,
+        routePolyline,
+        coveredPath,
+        driverHeading,
+        airportMessage
     ) { values: Array<Any?> ->
         LiveRideUiState(
             activeRide = values[0] as ActiveRide?,
@@ -100,7 +158,11 @@ class LiveRideViewModel @Inject constructor(
             distance = values[6] as String,
             rideOtp = values[7] as String,
             pickupArrivalDetected = values[8] as Boolean,
-            dropoffArrivalDetected = values[9] as Boolean
+            dropoffArrivalDetected = values[9] as Boolean,
+            routePolyline = (values[10] as? List<LatLng>) ?: emptyList(),
+            coveredPath = (values[11] as? List<LatLng>) ?: emptyList(),
+            driverHeading = values[12] as Float?,
+            airportMessage = values[13] as String?
         )
     }.stateIn(
         scope = viewModelScope,
@@ -120,18 +182,32 @@ class LiveRideViewModel @Inject constructor(
     private val _isReceivingSocketUpdates = MutableStateFlow(false)
     val isReceivingSocketUpdates: StateFlow<Boolean> = _isReceivingSocketUpdates.asStateFlow()
     
-    // Debouncing mechanism to prevent excessive view updates
+    // UI update throttling (1-2s for smoothness)
     private var lastViewUpdateTime = 0L
-    private val viewUpdateThrottleInterval = 500L // 500ms throttle
+    private val viewUpdateThrottleInterval = 1500L // 1.5s throttle for UI updates
     private var lastCarLocation: LatLng? = null
     
     // Throttle update job
     private var updateJob: Job? = null
     
+    // Route calculation throttling (avoid excessive API calls)
+    private var lastRouteCalculationTime = 0L
+    private val routeCalculationInterval = 5000L // Minimum 5s between route calculations
+    private val routeRecalculationDistanceThreshold = 20.0 // 20 meters
+    private var routeCalculationJob: Job? = null
+    private var lastRouteOrigin: LatLng? = null
+    private var lastRouteDestination: LatLng? = null
+    private var lastRouteStatus: String? = null
+    private var isRouteCalculationInProgress = false
+    
+    // GPS noise filtering (5-10m threshold)
+    private val gpsNoiseThreshold = 7.5 // meters
+    
     init {
         observeActiveRide()
         observeDriverLocations()
         startThrottledUpdates()
+        startRouteCalculation()
     }
     
     /**
@@ -142,7 +218,6 @@ class LiveRideViewModel @Inject constructor(
             socketService.activeRide
                 .filterNotNull()
                 .collect { ride ->
-                    Timber.d("📱 Active ride received: ${ride.bookingId}, status: ${ride.status}")
                     handleActiveRideUpdate(ride)
                 }
         }
@@ -150,11 +225,11 @@ class LiveRideViewModel @Inject constructor(
     
     /**
      * Observe driver location updates from SocketService
+     * Throttled to 1-2s for UI updates, but accepts all updates for analytics
      */
     private fun observeDriverLocations() {
         viewModelScope.launch {
             socketService.driverLocations
-                .debounce(500) // Throttle updates to 500ms
                 .collect { locations ->
                     processDriverLocationUpdates(locations)
                 }
@@ -174,7 +249,7 @@ class LiveRideViewModel @Inject constructor(
     }
     
     /**
-     * Throttled view update to prevent excessive refreshes
+     * Throttled view update to prevent excessive refreshes (1-2s interval)
      */
     private fun throttledViewUpdate() {
         val now = System.currentTimeMillis()
@@ -185,7 +260,11 @@ class LiveRideViewModel @Inject constructor(
         
         _activeRide.value?.let { ride ->
             updateStatusUI(ride.status)
-            updateEstimatedMetrics(ride)
+        }
+        
+        // Update map region if user hasn't interacted
+        if (!_userHasInteractedWithMap.value) {
+            updateMapRegion()
         }
     }
     
@@ -206,6 +285,13 @@ class LiveRideViewModel @Inject constructor(
             lastCarLocation = driverLoc
         }
         
+        // Check for status change and generate OTP if needed
+        val statusChanged = lastStatus != ride.status
+        if (statusChanged) {
+            handleStatusChange(ride)
+        }
+        lastStatus = ride.status
+        
         // Update status message
         updateStatusUI(ride.status)
 
@@ -214,21 +300,66 @@ class LiveRideViewModel @Inject constructor(
             updateProximity(ride, driverLoc)
         }
         
+        // Trigger initial route calculation when active ride is received
+        // This ensures ETA/distance is calculated immediately
+        viewModelScope.launch {
+            delay(500) // Small delay to ensure locations are set
+            calculateRouteIfNeeded(force = true)
+        }
+        
         // Update map region if user hasn't interacted
         if (!_userHasInteractedWithMap.value) {
             updateMapRegion()
         }
         
-        // Join booking room for real-time updates
-        ride.bookingId.toIntOrNull()?.let { bookingId ->
-            socketService.joinBookingRoom(bookingId)
-        }
+        // Note: Room joining is now handled in SocketService when active ride is received
+    }
+    
+    /**
+     * Handle status change and generate OTP when appropriate
+     */
+    private fun handleStatusChange(ride: ActiveRide) {
+        val bookingId = ride.bookingId.toIntOrNull() ?: return
         
-        Timber.d("🚗 Active ride processed: ${ride.bookingId}, Status: ${ride.status}")
+        // Generate OTP when status changes to on_location (preferred) or en_route_pu (alternative)
+        when (ride.status) {
+            "on_location", "en_route_pu" -> {
+                // Only generate if we haven't already generated for this booking
+                if (otpGeneratedForBooking != bookingId && !_isGeneratingOTP.value) {
+                    generateRideOTP(bookingId)
+                }
+            }
+        }
+    }
+    
+    /**
+     * Generate ride OTP for the booking
+     */
+    private fun generateRideOTP(bookingId: Int) {
+        viewModelScope.launch {
+            _isGeneratingOTP.value = true
+            _otpError.value = null
+            
+            val result = bookingService.generateRideOTP(bookingId)
+            result.fold(
+                onSuccess = { response ->
+                    _rideOTP.value = response.otp
+                    otpGeneratedForBooking = bookingId
+                    _otpError.value = null
+                },
+                onFailure = { error ->
+                    _otpError.value = error.message ?: "Failed to generate OTP"
+                    // Don't clear existing OTP on failure - preserve last valid state
+                }
+            )
+            
+            _isGeneratingOTP.value = false
+        }
     }
     
     /**
      * Process driver location updates from socket
+     * Filters GPS noise and throttles UI updates
      */
     private fun processDriverLocationUpdates(locations: List<DriverLocationUpdate>) {
         val currentRide = _activeRide.value ?: return
@@ -238,26 +369,83 @@ class LiveRideViewModel @Inject constructor(
             ?.let { update ->
                 val newLocation = LatLng(update.latitude, update.longitude)
                 
-                // Only update if location changed significantly (> 10 meters)
+                // Update driver heading if available
+                if (update.heading > 0) {
+                    _driverHeading.value = update.heading.toFloat()
+                } else {
+                    // Calculate heading from previous location
+                    lastCarLocation?.let { prevLoc ->
+                        val bearing = calculateBearing(prevLoc, newLocation)
+                        _driverHeading.value = bearing
+                    }
+                }
+                
+                // Filter GPS noise: only update if moved > threshold
                 if (shouldUpdateLocation(newLocation)) {
+                    val prevLocation = lastCarLocation
                     _driverLocation.value = newLocation
                     lastCarLocation = newLocation
                     _isReceivingSocketUpdates.value = true
 
                     updateProximity(currentRide, newLocation)
                     
-                    // Update map region if user hasn't interacted
-                    if (!_userHasInteractedWithMap.value) {
-                        updateMapRegion()
+                    // Check for airport/campus detection
+                    checkAirportCampus(newLocation)
+                    
+                    // Update covered path based on driver position (with monotonic progress)
+                    updateCoveredPath(newLocation)
+                    
+                    // Trigger route recalculation if driver moved significantly or status changed
+                    if (prevLocation != null) {
+                        val distanceMoved = calculateDistance(prevLocation, newLocation)
+                        if (distanceMoved > routeRecalculationDistanceThreshold) {
+                            triggerRouteRecalculation()
+                        }
+                    } else {
+                        // First location update - trigger initial route calculation
+                        triggerRouteRecalculation()
                     }
                     
-                    Timber.d("📍 Driver location updated: ${update.latitude}, ${update.longitude}")
+                    // Throttled UI update
+                    throttledViewUpdate()
                 }
             }
     }
     
     /**
-     * Check if location should be updated (distance-based throttling)
+     * Calculate bearing between two points
+     */
+    private fun calculateBearing(from: LatLng, to: LatLng): Float {
+        val lat1 = Math.toRadians(from.latitude)
+        val lon1 = Math.toRadians(from.longitude)
+        val lat2 = Math.toRadians(to.latitude)
+        val lon2 = Math.toRadians(to.longitude)
+
+        val dLon = lon2 - lon1
+        val y = Math.sin(dLon) * Math.cos(lat2)
+        val x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon)
+
+        val bearing = Math.toDegrees(Math.atan2(y, x))
+        return ((bearing + 360) % 360).toFloat()
+    }
+    
+    /**
+     * Calculate distance between two points in meters
+     */
+    private fun calculateDistance(from: LatLng, to: LatLng): Float {
+        val results = FloatArray(1)
+        android.location.Location.distanceBetween(
+            from.latitude,
+            from.longitude,
+            to.latitude,
+            to.longitude,
+            results
+        )
+        return results[0]
+    }
+    
+    /**
+     * Check if location should be updated (GPS noise filtering: 7.5m threshold)
      */
     private fun shouldUpdateLocation(newLocation: LatLng): Boolean {
         val lastLocation = lastCarLocation ?: return true
@@ -271,45 +459,83 @@ class LiveRideViewModel @Inject constructor(
             results
         )
         
-        // Update if moved more than 10 meters
-        return results[0] > 10
+        // Filter GPS noise: only update if moved more than threshold (7.5m)
+        return results[0] > gpsNoiseThreshold
     }
     
     /**
-     * Update map region to show driver and route
+     * Update map region to show driver and destination based on ride status
+     * Uber-like behavior: Show driver + pickup (en_route_pu) or driver + dropoff (en_route_do)
      */
     private fun updateMapRegion() {
         val driverLoc = _driverLocation.value ?: return
-        val pickupLoc = _pickupLocation.value ?: return
-        val dropoffLoc = _dropoffLocation.value ?: return
+        val ride = _activeRide.value ?: return
         
+        // Determine which destination to show based on ride status
+        val destination = when (ride.status) {
+            "en_route_pu" -> _pickupLocation.value
+            "en_route_do", "started" -> _dropoffLocation.value
+            else -> null
+        }
+        
+        if (destination == null) {
+            // Fallback: show all locations
+            val pickupLoc = _pickupLocation.value
+            val dropoffLoc = _dropoffLocation.value
+            
+            if (pickupLoc != null && dropoffLoc != null) {
+                val bounds = LatLngBounds.builder()
+                    .include(driverLoc)
+                    .include(pickupLoc)
+                    .include(dropoffLoc)
+                    .build()
+                
+                _mapRegion.value = MapRegion(
+                    center = bounds.center,
+                    zoom = calculateZoomFromBounds(bounds)
+                )
+            } else {
+                // Just center on driver
+                _mapRegion.value = MapRegion(
+                    center = driverLoc,
+                    zoom = 16f
+                )
+            }
+            return
+        }
+        
+        // Create bounds with driver and destination
         val bounds = LatLngBounds.builder()
             .include(driverLoc)
-            .include(pickupLoc)
-            .include(dropoffLoc)
+            .include(destination)
             .build()
         
-        val width = bounds.northeast.longitude - bounds.southwest.longitude
-        val height = bounds.northeast.latitude - bounds.southwest.latitude
-        val maxDimension = maxOf(width, height)
-        
-        // Add padding for better view
-        val scale = (maxDimension * 1.2).coerceIn(0.01, 0.1)
-        
         _mapRegion.value = MapRegion(
-            center = LatLng(driverLoc.latitude, driverLoc.longitude),
-            zoom = calculateZoomLevel(scale)
+            center = bounds.center,
+            zoom = calculateZoomFromBounds(bounds)
         )
     }
     
     /**
-     * Calculate zoom level from scale
+     * Calculate zoom level from bounds
      */
-    private fun calculateZoomLevel(scale: Double): Float {
-        val base = 2.0
-        val zoom = -1.0 * (kotlin.math.log10(scale) / kotlin.math.log10(2.0) - 1.0)
-        return zoom.toFloat().coerceIn(10f, 20f)
+    private fun calculateZoomFromBounds(bounds: LatLngBounds): Float {
+        val width = bounds.northeast.longitude - bounds.southwest.longitude
+        val height = bounds.northeast.latitude - bounds.southwest.latitude
+        val maxDimension = maxOf(width, height)
+        
+        // Calculate zoom level based on bounds
+        // Larger bounds = lower zoom, smaller bounds = higher zoom
+        val zoom = when {
+            maxDimension > 0.1 -> 11f // Very wide view
+            maxDimension > 0.05 -> 13f // Wide view
+            maxDimension > 0.01 -> 15f // Medium view
+            else -> 17f // Close view
+        }
+        
+        return zoom.coerceIn(11f, 18f)
     }
+    
     
     /**
      * Update status UI based on ride status
@@ -363,30 +589,331 @@ class LiveRideViewModel @Inject constructor(
     }
     
     /**
-     * Update estimated time and distance
+     * Start route calculation job
      */
-    private fun updateEstimatedMetrics(ride: ActiveRide) {
-        val driverLoc = _driverLocation.value
-        val dropoffLoc = _dropoffLocation.value
-        
-        if (driverLoc != null && dropoffLoc != null) {
-            val results = FloatArray(1)
-            Location.distanceBetween(
-                driverLoc.latitude,
-                driverLoc.longitude,
-                dropoffLoc.latitude,
-                dropoffLoc.longitude,
-                results
-            )
-            
-            val distanceKm = results[0] / 1000
-            _distance.value = String.format("%.1f km", distanceKm)
-            
-            // Estimate time (assuming 60 km/h average speed)
-            val estimatedMinutes = (distanceKm / 60 * 60).toInt()
-            _estimatedTime.value = "${estimatedMinutes} min"
+    private fun startRouteCalculation() {
+        routeCalculationJob = viewModelScope.launch {
+            while (true) {
+                delay(routeCalculationInterval)
+                calculateRouteIfNeeded()
+            }
         }
     }
+    
+    /**
+     * Trigger route recalculation (called when driver moves significantly)
+     */
+    private fun triggerRouteRecalculation() {
+        viewModelScope.launch {
+            calculateRouteIfNeeded(force = true)
+        }
+    }
+    
+    /**
+     * Calculate route based on ride status
+     * en_route_pu: driver_current_location → pickup_location
+     * en_route_do / ride_in_progress: driver_current_location → dropoff_location
+     * 
+     * Only recalculates when:
+     * - Status changes
+     * - Driver moves > 20m from last route origin
+     * - Minimum time interval elapsed (5s)
+     * 
+     * Preserves last valid values if calculation fails
+     */
+    private suspend fun calculateRouteIfNeeded(force: Boolean = false) {
+        val ride = _activeRide.value ?: return
+        val driverLoc = _driverLocation.value ?: return
+        
+        // Determine destination based on ride status
+        val destination = when (ride.status) {
+            "en_route_pu" -> {
+                val pickupLoc = _pickupLocation.value
+                if (pickupLoc == null || (pickupLoc.latitude == 0.0 && pickupLoc.longitude == 0.0)) {
+                    return
+                }
+                pickupLoc
+            }
+            "en_route_do", "started", "ride_in_progress" -> {
+                val dropoffLoc = _dropoffLocation.value
+                if (dropoffLoc == null || (dropoffLoc.latitude == 0.0 && dropoffLoc.longitude == 0.0)) {
+                    return
+                }
+                dropoffLoc
+            }
+            else -> {
+                return // No route needed for other statuses
+            }
+        }
+        
+        // Validate coordinates
+        if (driverLoc.latitude == 0.0 && driverLoc.longitude == 0.0 ||
+            destination.latitude == 0.0 && destination.longitude == 0.0) {
+            return
+        }
+        
+        // Prevent concurrent route calculations
+        if (isRouteCalculationInProgress) {
+            return
+        }
+        
+        // Check if we need to recalculate
+        val now = System.currentTimeMillis()
+        val statusChanged = lastRouteStatus != ride.status
+        val originMoved = lastRouteOrigin?.let { origin ->
+            calculateDistance(origin, driverLoc) > routeRecalculationDistanceThreshold
+        } ?: true
+        val timeElapsed = now - lastRouteCalculationTime > routeCalculationInterval
+        
+        val shouldRecalculate = force || statusChanged || (originMoved && timeElapsed)
+        
+        if (!shouldRecalculate) {
+            return
+        }
+        
+        isRouteCalculationInProgress = true
+        lastRouteCalculationTime = now
+        lastRouteOrigin = driverLoc
+        lastRouteDestination = destination
+        lastRouteStatus = ride.status
+        
+        val startTime = System.currentTimeMillis()
+        try {
+            val routeResult = directionsService.getRouteWithPolyline(
+                originLat = driverLoc.latitude,
+                originLong = driverLoc.longitude,
+                destLat = destination.latitude,
+                destLong = destination.longitude
+            )
+            
+            val calculationTime = System.currentTimeMillis() - startTime
+            
+            if (routeResult == null) {
+                // Route calculation failed - preserve last valid values
+                LiveRideMetrics.recordRouteFailure()
+                return
+            }
+            
+            val (distance, duration, polyline) = routeResult
+            
+            // Validate route data
+            if (distance <= 0 || duration <= 0 || polyline.isEmpty()) {
+                LiveRideMetrics.recordRouteFailure()
+                return
+            }
+            
+            // Update route polyline (road-snapped)
+            _routePolyline.value = polyline
+            lastValidRoute = polyline
+            lastValidRouteOrigin = driverLoc
+            lastValidRouteDestination = destination
+            lastValidRouteTimestamp = now
+            
+            // Update ETA and distance with smoothing
+            updateETAFromRoute(distance, duration)
+            hasValidRouteData = true
+            lastValidETASeconds = duration
+            lastValidDistanceMeters = distance
+            
+            // Record successful route calculation
+            LiveRideMetrics.recordRouteSuccess(calculationTime)
+            
+        } catch (e: Exception) {
+            LiveRideMetrics.recordRouteFailure()
+            // Preserve last valid values on error
+        } finally {
+            isRouteCalculationInProgress = false
+        }
+    }
+    
+    /**
+     * Update ETA and distance from route calculation
+     * Applies exponential moving average smoothing to ETA to avoid flicker
+     */
+    private fun updateETAFromRoute(distanceMeters: Int, durationSeconds: Int) {
+        // Validate input
+        if (distanceMeters <= 0 || durationSeconds <= 0) {
+            return
+        }
+        
+        // Format distance (no smoothing needed)
+        val distanceKm = distanceMeters / 1000.0
+        val formattedDistance = if (distanceKm >= 1.0) {
+            String.format("%.1f km", distanceKm)
+        } else {
+            "${distanceMeters}m"
+        }
+        
+        // Apply EMA smoothing to ETA
+        val smoothedDuration = if (smoothedETA != null) {
+            // Exponential Moving Average
+            (etaSmoothingAlpha * durationSeconds + (1 - etaSmoothingAlpha) * smoothedETA!!).toInt()
+        } else {
+            smoothedETA = durationSeconds.toDouble()
+            durationSeconds
+        }
+        smoothedETA = smoothedDuration.toDouble()
+        
+        // Format duration
+        val minutes = smoothedDuration / 60
+        val hours = minutes / 60
+        val formattedETA = if (hours > 0) {
+            "${hours}h ${minutes % 60}m"
+        } else {
+            "${minutes} min"
+        }
+        
+        // Update values atomically
+        _distance.value = formattedDistance
+        _estimatedTime.value = formattedETA
+        
+        // Store as last valid values
+        lastValidDistance = formattedDistance
+        lastValidETA = formattedETA
+    }
+    
+    /**
+     * Update covered path by projecting driver position onto route
+     * Slices the route polyline up to the projection point
+     * Production-ready: enforces monotonic progress to prevent backwards movement
+     */
+    private fun updateCoveredPath(driverLocation: LatLng) {
+        val fullRoute = _routePolyline.value
+        if (fullRoute.isEmpty() || fullRoute.size < 2) {
+            _coveredPath.value = emptyList()
+            return
+        }
+        
+        // Project driver onto route polyline (nearest segment + fraction)
+        var bestSegmentIndex = 0
+        var bestFraction = 0.0
+        var minDistance = Double.MAX_VALUE
+        
+        // Find nearest segment and fraction along it
+        for (i in 0 until fullRoute.lastIndex) {
+            val segmentStart = fullRoute[i]
+            val segmentEnd = fullRoute[i + 1]
+            val projection = projectPointToSegment(driverLocation, segmentStart, segmentEnd)
+            val d = FloatArray(1)
+            Location.distanceBetween(
+                driverLocation.latitude, driverLocation.longitude,
+                projection.latitude, projection.longitude,
+                d
+            )
+            val distance = d.firstOrNull()?.toDouble() ?: Double.MAX_VALUE
+            if (distance < minDistance) {
+                minDistance = distance
+                bestSegmentIndex = i
+                // Calculate fraction along segment
+                val segmentLength = FloatArray(1)
+                Location.distanceBetween(
+                    segmentStart.latitude, segmentStart.longitude,
+                    segmentEnd.latitude, segmentEnd.longitude,
+                    segmentLength
+                )
+                val toStart = FloatArray(1)
+                Location.distanceBetween(
+                    segmentStart.latitude, segmentStart.longitude,
+                    projection.latitude, projection.longitude,
+                    toStart
+                )
+                bestFraction = if (segmentLength[0] > 0) {
+                    (toStart[0] / segmentLength[0]).toDouble().coerceIn(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            }
+        }
+
+        // Calculate progress in meters along route
+        var progressMeters = 0.0
+        for (i in 0 until bestSegmentIndex) {
+            val d = FloatArray(1)
+            Location.distanceBetween(
+                fullRoute[i].latitude, fullRoute[i].longitude,
+                fullRoute[i + 1].latitude, fullRoute[i + 1].longitude,
+                d
+            )
+            progressMeters += d.firstOrNull()?.toDouble() ?: 0.0
+        }
+        // Add fraction of current segment
+        if (bestSegmentIndex < fullRoute.lastIndex) {
+            val d = FloatArray(1)
+            Location.distanceBetween(
+                fullRoute[bestSegmentIndex].latitude, fullRoute[bestSegmentIndex].longitude,
+                fullRoute[bestSegmentIndex + 1].latitude, fullRoute[bestSegmentIndex + 1].longitude,
+                d
+            )
+            progressMeters += (d.firstOrNull()?.toDouble() ?: 0.0) * bestFraction
+        }
+
+        // Enforce monotonic progress (ignore small backwards jumps, allow large reversals)
+        val progressDelta = progressMeters - lastProgressMeters
+        if (progressDelta < -progressBackstepThreshold) {
+            // Large intentional reversal - allow it
+            lastProgressMeters = progressMeters
+            projectionBackstepCount++
+        } else if (progressDelta < 0) {
+            // Small backwards jump - ignore it (GPS noise or route recalculation)
+            return
+        } else {
+            // Forward progress - update
+            lastProgressMeters = progressMeters
+        }
+
+        // Slice the route up to projection point
+        val sliceEndIndex = if (bestFraction > 0.5) {
+            bestSegmentIndex + 1
+        } else {
+            bestSegmentIndex
+        }.coerceAtMost(fullRoute.size - 1)
+        
+        _coveredPath.value = fullRoute.subList(0, sliceEndIndex + 1)
+    }
+
+    /**
+     * Project a point onto a line segment
+     */
+    private fun projectPointToSegment(point: LatLng, segmentStart: LatLng, segmentEnd: LatLng): LatLng {
+        val dx = segmentEnd.longitude - segmentStart.longitude
+        val dy = segmentEnd.latitude - segmentStart.latitude
+        val d2 = dx * dx + dy * dy
+        
+        if (d2 == 0.0) return segmentStart
+        
+        val t = ((point.longitude - segmentStart.longitude) * dx + 
+                (point.latitude - segmentStart.latitude) * dy) / d2
+        val clampedT = t.coerceIn(0.0, 1.0)
+        
+        return LatLng(
+            segmentStart.latitude + clampedT * dy,
+            segmentStart.longitude + clampedT * dx
+        )
+    }
+
+    /**
+     * Check if driver is inside airport/campus and update message
+     */
+    private fun checkAirportCampus(location: LatLng) {
+        val site = airportCampusService.isInsideAirportOrCampus(location)
+        if (site != null && site != currentAirportSite) {
+            currentAirportSite = site
+            val message = airportCampusService.getTerminalMessage(site)
+            _airportMessage.value = message
+        } else if (site == null && currentAirportSite != null) {
+            currentAirportSite = null
+            _airportMessage.value = null
+        }
+    }
+    
+    /**
+     * REMOVED: updateEstimatedMetrics() - This method used straight-line calculation
+     * which caused incorrect and unstable ETA/distance values.
+     * 
+     * ETA and distance should ONLY be calculated from route data via Google Directions API.
+     * If route calculation fails, we preserve the last valid values instead of showing
+     * incorrect straight-line estimates.
+     */
     
     /**
      * User interacted with map (manual pan/zoom)
@@ -418,7 +945,6 @@ class LiveRideViewModel @Inject constructor(
         // Join booking room for real-time updates
         bookingId.toIntOrNull()?.let { bookingIdInt ->
             socketService.joinBookingRoom(bookingIdInt)
-            Timber.d("LiveRideViewModel: Joined booking room for booking $bookingId")
         }
 
         // If we already have active ride data for this booking, ensure it's properly initialized
@@ -426,20 +952,51 @@ class LiveRideViewModel @Inject constructor(
         if (currentRide != null && currentRide.bookingId == bookingId) {
             // Data is already available and matches, ensure proper initialization
             handleActiveRideUpdate(currentRide)
-        } else {
-            // No data or wrong booking, wait for socket data
-            Timber.d("LiveRideViewModel: No active ride data for booking $bookingId, waiting for socket data")
         }
     }
     
+    /**
+     * Submit driver feedback
+     */
+    fun submitDriverFeedback(
+        bookingId: Int,
+        rating: Int,
+        feedback: String?,
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = bookingService.submitDriverFeedback(bookingId, rating, feedback)
+            result.fold(
+                onSuccess = { onSuccess() },
+                onFailure = { error ->
+                    onFailure(error.message ?: "Failed to submit feedback")
+                }
+            )
+        }
+    }
+    
+    /**
+     * Get instrumentation metrics for monitoring
+     */
+    fun getMetrics(): Map<String, Any> {
+        val roadsMetrics = roadsSnappingService.getMetrics()
+        return mapOf(
+            "projectionBackstepCount" to projectionBackstepCount,
+            "roadsSnapSuccessRate" to (roadsMetrics["snapSuccessRate"] ?: 0.0),
+            "roadsSnapAvgLatencyMs" to (roadsMetrics["snapAvgLatencyMs"] ?: 0L)
+        )
+    }
+
     override fun onCleared() {
         super.onCleared()
         updateJob?.cancel()
+        routeCalculationJob?.cancel()
         
-        // Leave booking room
-        _activeRide.value?.bookingId?.toIntOrNull()?.let { bookingId ->
-            socketService.leaveBookingRoom(bookingId)
-        }
+        // NOTE: Do NOT leave booking room here - SocketService manages room membership
+        // based on active ride state. Leaving the room prematurely would stop
+        // driver.location.updates even when the ride is still active.
+        // Room cleanup is handled by SocketService when the ride actually ends.
     }
 }
 

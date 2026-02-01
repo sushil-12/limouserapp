@@ -67,7 +67,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import timber.log.Timber
 
 /**
  * COPIED / ADAPTED FROM DRIVER APP:
@@ -99,9 +98,7 @@ fun RideInProgressScreen(
     // Show completion dialog when ride ends (only once)
     LaunchedEffect(uiState.activeRide?.status) {
         val status = uiState.activeRide?.status
-        Timber.d("Ride status changed to: $status")
         if (status == "ended" && !hasShownCompletionDialog) {
-            Timber.d("Showing ride completion dialog")
             showCompletionDialog = true
             hasShownCompletionDialog = true
         }
@@ -122,9 +119,7 @@ fun RideInProgressScreen(
     )
 
     val ride = uiState.activeRide
-    Timber.d("RideInProgressScreen - activeRide: $ride, status: ${ride?.status}")
     if (ride == null) {
-        Timber.d("RideInProgressScreen - activeRide is null, showing loading")
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
@@ -136,9 +131,6 @@ fun RideInProgressScreen(
     val driverName = ride.driverName?.ifBlank { null } ?: "Driver"
     val driverPhone = ride.driverPhone?.ifBlank { null }
     val bookingNumber = "Booking #${ride.bookingId}"
-
-    // Debug logging
-    Timber.d("RideInProgressScreen - bookingId: ${ride.bookingId}, bookingNumber: $bookingNumber")
 
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
@@ -153,10 +145,8 @@ fun RideInProgressScreen(
                     .imePadding()
                     .verticalScroll(rememberScrollState())
             ) {
-                Timber.d("RideInProgressScreen - UI status checks: isRideEnded=${uiState.isRideEnded}, isRideStarted=${uiState.isRideStarted}, isArrivedAtPickup=${uiState.isArrivedAtPickup}, isEnRouteToPickup=${uiState.isEnRouteToPickup}")
                 when {
                     uiState.isRideEnded -> {
-                        Timber.d("RideInProgressScreen - Showing ride ended UI")
                         StatusHeaderBanner("Ride Completed")
                         Column(modifier = Modifier.padding(24.dp)) {
                             Text(
@@ -226,19 +216,47 @@ fun RideInProgressScreen(
                                 color = RideInProgressUiTokens.TextGrey
                             )
                             Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "1234",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
+                            
+                            val otp = uiState.rideOtp
+                            val isGeneratingOTP = viewModel.isGeneratingOTP.collectAsState().value
+                            
+                            if (isGeneratingOTP) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else if (otp.isNotEmpty()) {
+                                Text(
+                                    text = otp,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                            } else {
+                                Text(
+                                    text = "Generating...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = RideInProgressUiTokens.TextGrey
+                                )
+                            }
+                            
                             Spacer(Modifier.height(12.dp))
                             Text(
-                                text = "Provide this OTP to your driver for starting the ride. Do not share OTP on call or message. Please share OTP once you sit in the car.",
+                                text = "Share this code with your driver. Do not share OTP on call or message. Please share OTP once you sit in the car.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = RideInProgressUiTokens.TextGrey,
                                 lineHeight = 16.sp
                             )
+                            
+                            val otpError = viewModel.otpError.collectAsState().value
+                            if (otpError != null) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = otpError,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Red
+                                )
+                            }
                             Spacer(Modifier.height(24.dp))
 
                             TripTimelineView(pickup = ride.pickupAddress, dropoff = ride.dropoffAddress)
@@ -300,9 +318,10 @@ fun RideInProgressScreen(
     // Ride completion dialog
     RideCompletionDialog(
         isPresented = showCompletionDialog,
+        bookingId = ride.bookingId.toIntOrNull(),
+        viewModel = viewModel,
         onRatingSubmitted = { rating, feedback ->
-            // TODO: Submit rating to backend
-            Timber.d("Rating submitted: $rating, feedback: $feedback")
+            // Feedback submitted successfully
         },
         onDismiss = {
             showCompletionDialog = false
@@ -317,7 +336,9 @@ fun RideInProgressScreen(
 @Composable
 private fun RideCompletionDialog(
     isPresented: Boolean,
-    onRatingSubmitted: (RatingType, String?) -> Unit,
+    bookingId: Int?,
+    viewModel: LiveRideViewModel,
+    onRatingSubmitted: (Int, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
     if (!isPresented) return
@@ -338,6 +359,8 @@ private fun RideCompletionDialog(
             shape = RoundedCornerShape(20.dp)
         ) {
             RideCompletionDialogContent(
+                bookingId = bookingId,
+                viewModel = viewModel,
                 onRatingSubmitted = onRatingSubmitted,
                 onDismiss = onDismiss
             )
@@ -347,7 +370,9 @@ private fun RideCompletionDialog(
 
 @Composable
 private fun RideCompletionDialogContent(
-    onRatingSubmitted: (RatingType, String?) -> Unit,
+    bookingId: Int?,
+    viewModel: LiveRideViewModel,
+    onRatingSubmitted: (Int, String?) -> Unit,
     onDismiss: () -> Unit
 ) {
     var selectedRating by remember { mutableStateOf(RatingType.NONE) }
@@ -438,9 +463,6 @@ private fun RideCompletionDialogContent(
                         selectedRating = rating
                         showFeedbackField = false
                         feedbackText = ""
-                        // Auto-submit for like
-                        onRatingSubmitted(RatingType.LIKE, null)
-                        onDismiss()
                     }
                 )
             }
@@ -489,16 +511,31 @@ private fun RideCompletionDialogContent(
             // Submit button
             Button(
                 onClick = {
-                    if (selectedRating != RatingType.NONE && !isSubmitting) {
+                    if (selectedRating != RatingType.NONE && !isSubmitting && bookingId != null) {
                         isSubmitting = true
-                        val feedback = if (selectedRating == RatingType.UNLIKE) feedbackText else null
-                        onRatingSubmitted(selectedRating, feedback)
-                        onDismiss()
+                        val rating = if (selectedRating == RatingType.LIKE) 5 else 1
+                        val feedback = if (selectedRating == RatingType.UNLIKE) feedbackText.trim().takeIf { it.isNotEmpty() } else null
+                        
+                        viewModel.submitDriverFeedback(
+                            bookingId = bookingId,
+                            rating = rating,
+                            feedback = feedback,
+                            onSuccess = {
+                                onRatingSubmitted(rating, feedback)
+                                onDismiss()
+                            },
+                            onFailure = { error ->
+                                isSubmitting = false
+                                // Show error - could add a snackbar here
+                            }
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = selectedRating != RatingType.NONE &&
-                         !(selectedRating == RatingType.UNLIKE && feedbackText.trim().isEmpty()),
+                         !(selectedRating == RatingType.UNLIKE && feedbackText.trim().isEmpty()) &&
+                         !isSubmitting &&
+                         bookingId != null,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = when (selectedRating) {
                         RatingType.LIKE -> Color.Green
@@ -508,9 +545,10 @@ private fun RideCompletionDialogContent(
                 )
             ) {
                 if (isSubmitting) {
-                    LinearProgressIndicator(
+                    CircularProgressIndicator(
                         color = Color.White,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
                     )
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -521,7 +559,7 @@ private fun RideCompletionDialogContent(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isSubmitting) "Submitting..." else if (selectedRating == RatingType.LIKE) "Great!" else "Submit Feedback",
+                            text = if (selectedRating == RatingType.LIKE) "Great!" else "Submit Feedback",
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold
                         )

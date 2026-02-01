@@ -1,7 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="Theme.Limouserapp" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowIsTranslucent">true</item>
-        <item name="android:forceDarkAllowed">false</item>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.Limouserapp" parent="Theme.SplashScreen">
+
+        <item name="windowSplashScreenBackground">@android:color/black</item>
+
+        <item name="windowSplashScreenAnimatedIcon">@drawable/logosplash</item>
+
+        <item name="windowSplashScreenAnimationDuration">300</item>
+
+        <item name="postSplashScreenTheme">@style/Theme.Limouserapp.Base</item>
     </style>
+
+    <style name="Theme.Limouserapp.Base" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Make status bar transparent -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Remove app title from action bar -->
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:forceDarkAllowed">false</item>
+        <!-- Full screen and edge-to-edge -->
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <!-- Enable edge-to-edge display -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+
 </resources>

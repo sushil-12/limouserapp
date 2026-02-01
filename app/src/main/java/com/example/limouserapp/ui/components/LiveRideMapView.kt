@@ -10,10 +10,20 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.TwoWayConverter
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.limouserapp.R
 import com.example.limouserapp.ui.liveride.LiveRideViewModel
@@ -37,9 +47,7 @@ val LatLngVectorConverter = TwoWayConverter<LatLng, AnimationVector2D>(
 @Composable
 fun LiveRideMapView(
     viewModel: LiveRideViewModel,
-    modifier: Modifier = Modifier,
-    activeRoutePolyline: List<LatLng> = emptyList(),
-    previewRoutePolyline: List<LatLng> = emptyList()
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val isDarkTheme = isSystemInDarkTheme()
@@ -68,9 +76,15 @@ fun LiveRideMapView(
     }
 
     // Collect states
-    val driverLocation by viewModel.driverLocation.collectAsState()
-    val pickupLocation by viewModel.pickupLocation.collectAsState()
-    val dropoffLocation by viewModel.dropoffLocation.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
+    val driverLocation = uiState.driverLocation
+    val pickupLocation = uiState.pickupLocation
+    val dropoffLocation = uiState.dropoffLocation
+    val routePolyline = uiState.routePolyline
+    val coveredPath = uiState.coveredPath
+    val driverHeading = uiState.driverHeading
+    val rideStatus = uiState.status
+    val airportMessage = uiState.airportMessage
     val mapRegion by viewModel.mapRegion.collectAsState()
     val userHasInteracted by viewModel.userHasInteractedWithMap.collectAsState()
 
@@ -83,13 +97,20 @@ fun LiveRideMapView(
     }
     val animatedDriverBearing = remember { Animatable(0f) }
 
-    // Calculate bearing from driver location changes
+    // Calculate bearing from driver location changes or use provided heading
     var previousDriverLocation by remember { mutableStateOf<LatLng?>(null) }
 
-    LaunchedEffect(driverLocation) {
+    LaunchedEffect(driverLocation, driverHeading) {
         driverLocation?.let { currentLocation ->
-            previousDriverLocation?.let { previousLocation ->
-                val bearing = calculateBearing(previousLocation, currentLocation)
+            val bearing = driverHeading ?: run {
+                // Calculate bearing from previous location if heading not provided
+                previousDriverLocation?.let { prevLoc ->
+                    calculateBearing(prevLoc, currentLocation)
+                } ?: 0f
+            }
+
+            previousDriverLocation?.let {
+                // Animate to new position
                 launch {
                     animatedDriverPosition.animateTo(
                         targetValue = currentLocation,
@@ -102,14 +123,14 @@ fun LiveRideMapView(
                     while (diff < -180) diff += 360
                     while (diff > 180) diff -= 360
                     animatedDriverBearing.animateTo(
-                        targetValue = current + diff,
+                        targetValue = bearing,
                         animationSpec = tween(durationMillis = 800, easing = LinearEasing)
                     )
                 }
             } ?: run {
                 // First location update
                 animatedDriverPosition.snapTo(currentLocation)
-                animatedDriverBearing.snapTo(0f)
+                animatedDriverBearing.snapTo(bearing)
             }
             previousDriverLocation = currentLocation
         }
@@ -118,27 +139,40 @@ fun LiveRideMapView(
     var isUserInteracting by remember { mutableStateOf(false) }
     var lastInteractionTime by remember { mutableLongStateOf(0L) }
 
-    // Initial Fit
-    LaunchedEffect(pickupLocation, dropoffLocation) {
-        if (pickupLocation != null && dropoffLocation != null) {
-            val bounds = LatLngBounds.Builder().include(pickupLocation!!).include(dropoffLocation!!).build()
-            cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(bounds, 150), 1000)
-        }
-    }
+    // Auto-adjust camera bounds based on ride status (only if user hasn't interacted)
+    LaunchedEffect(mapRegion, userHasInteracted, driverLocation, pickupLocation, dropoffLocation, rideStatus) {
+        if (!userHasInteracted && driverLocation != null) {
+            // Determine which destination to show based on ride status
+            val destination = when (rideStatus) {
+                "en_route_pu" -> pickupLocation
+                "en_route_do", "started", "ride_in_progress" -> dropoffLocation
+                else -> null
+            }
 
-    // Auto-follow driver when not interacting
-    LaunchedEffect(driverLocation, isUserInteracting) {
-        if (driverLocation != null && !isUserInteracting) {
-            if (System.currentTimeMillis() - lastInteractionTime > 3000) {
-                val currentZoom = cameraPositionState.position.zoom.takeIf { it > 10f } ?: 16f
-                val tilt = if (currentZoom > 15f) 45f else 0f
+            if (destination != null) {
+                // Create bounds with driver and destination
+                val bounds = LatLngBounds.Builder()
+                    .include(driverLocation)
+                    .include(destination)
+                    .build()
 
+                // Smooth camera animation with tilt for navigation feel
                 val cameraUpdate = CameraUpdateFactory.newCameraPosition(
                     CameraPosition.Builder()
-                        .target(driverLocation!!)
-                        .zoom(currentZoom)
-                        .bearing(0f)
-                        .tilt(tilt)
+                        .target(bounds.center)
+                        .zoom(mapRegion?.zoom ?: 15f)
+                        .bearing(driverHeading ?: 0f)
+                        .tilt(45f)
+                        .build()
+                )
+                cameraPositionState.animate(cameraUpdate, 1000)
+            } else if (mapRegion != null) {
+                val cameraUpdate = CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder()
+                        .target(mapRegion!!.center)
+                        .zoom(mapRegion!!.zoom)
+                        .bearing(driverHeading ?: 0f)
+                        .tilt(45f)
                         .build()
                 )
                 cameraPositionState.animate(cameraUpdate, 1000)
@@ -146,27 +180,33 @@ fun LiveRideMapView(
         }
     }
 
-    // Update camera position when mapRegion changes and user hasn't interacted
-    LaunchedEffect(mapRegion, userHasInteracted) {
-        if (mapRegion != null && !userHasInteracted) {
-            val position = CameraPosition.Builder()
-                .target(mapRegion!!.center)
-                .zoom(mapRegion!!.zoom)
-                .bearing(0f)
-                .tilt(0f)
-                .build()
+    // Auto-follow driver when not interacting (smooth following)
+    LaunchedEffect(driverLocation, isUserInteracting, driverHeading) {
+        if (driverLocation != null && !isUserInteracting) {
+            if (System.currentTimeMillis() - lastInteractionTime > 3000) {
+                val currentZoom = cameraPositionState.position.zoom.takeIf { it > 10f } ?: 16f
 
-            cameraPositionState.animate(CameraUpdateFactory.newCameraPosition(position))
+                val cameraUpdate = CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder()
+                        .target(driverLocation!!)
+                        .zoom(currentZoom)
+                        .bearing(driverHeading ?: 0f)
+                        .tilt(45f) // Professional navigation tilt
+                        .build()
+                )
+                cameraPositionState.animate(cameraUpdate, 1000)
+            }
         }
     }
 
-    GoogleMap(
-        modifier = modifier,
-        cameraPositionState = cameraPositionState,
-        properties = mapProperties,
-        uiSettings = uiSettings,
-        onMapLoaded = { }
-    ) {
+    Box(modifier = modifier) {
+        GoogleMap(
+            modifier = Modifier.fillMaxSize(),
+            cameraPositionState = cameraPositionState,
+            properties = mapProperties,
+            uiSettings = uiSettings,
+            onMapLoaded = { }
+        ) {
         MapEffect(Unit) { map ->
             // FIX: Use the GmsMap alias to refer to the class constants
             map.setOnCameraMoveStartedListener { reason ->
@@ -180,20 +220,25 @@ fun LiveRideMapView(
             }
         }
 
-        if (activeRoutePolyline.isNotEmpty()) {
+        // Show covered path (traveled portion) - lighter gray
+        if (coveredPath.isNotEmpty() && coveredPath.size > 1) {
             Polyline(
-                points = activeRoutePolyline,
-                color = Color.Black,
-                width = 16f,
+                points = coveredPath,
+                color = Color(0xFFCCCCCC), // Light gray for traveled path
+                width = 12f,
                 zIndex = 1f,
                 startCap = RoundCap(),
                 endCap = RoundCap(),
                 jointType = JointType.ROUND
             )
+        }
+
+        // Show primary route polyline (remaining/uncovered portion) - solid black
+        if (routePolyline.isNotEmpty()) {
             Polyline(
-                points = activeRoutePolyline,
-                color = Color(0xFFFF9800),
-                width = 10f,
+                points = routePolyline,
+                color = Color(0xFF000000), // Solid black for primary route
+                width = 12f,
                 zIndex = 2f,
                 startCap = RoundCap(),
                 endCap = RoundCap(),
@@ -201,19 +246,10 @@ fun LiveRideMapView(
             )
         }
 
-        if (previewRoutePolyline.isNotEmpty()) {
-            Polyline(
-                points = previewRoutePolyline,
-                color = Color.Gray.copy(alpha = 0.6f),
-                width = 10f,
-                pattern = listOf(Dash(20f), Gap(10f)),
-                jointType = JointType.ROUND
-            )
-        }
-
-        pickupLocation?.let { location ->
+        // Show pickup marker only when en_route_pu
+        if (rideStatus == "en_route_pu" && pickupLocation != null) {
             Marker(
-                state = MarkerState(location),
+                state = MarkerState(pickupLocation),
                 title = "Pickup",
                 icon = bitmapDescriptorFromVector(context, R.drawable.ic_location_pin),
                 anchor = androidx.compose.ui.geometry.Offset(0.5f, 1.0f),
@@ -221,9 +257,10 @@ fun LiveRideMapView(
             )
         }
 
-        dropoffLocation?.let { location ->
+        // Show dropoff marker when en_route_do, started, or ride_in_progress
+        if ((rideStatus == "en_route_do" || rideStatus == "started" || rideStatus == "ride_in_progress") && dropoffLocation != null) {
             Marker(
-                state = MarkerState(location),
+                state = MarkerState(dropoffLocation),
                 title = "Dropoff",
                 icon = bitmapDescriptorFromVector(context, R.drawable.ic_location_pin),
                 anchor = androidx.compose.ui.geometry.Offset(0.5f, 1.0f),
@@ -231,6 +268,7 @@ fun LiveRideMapView(
             )
         }
 
+        // Driver marker with smooth animation and rotation
         if (driverLocation != null) {
             Marker(
                 state = MarkerState(animatedDriverPosition.value),
@@ -238,11 +276,31 @@ fun LiveRideMapView(
                 rotation = animatedDriverBearing.value,
                 anchor = androidx.compose.ui.geometry.Offset(0.5f, 0.5f),
                 zIndex = 5f,
-                flat = true
+                flat = true // Flat marker rotates with map
             )
+        }
+
+        // Airport/Campus message banner (production-ready: clear UX message)
+        if (airportMessage != null) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            ) {
+                Text(
+                    text = airportMessage,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
         }
     }
 }
+    }
 
 /**
  * Calculate bearing between two LatLng points
@@ -285,3 +343,5 @@ fun bitmapDescriptorFromVector(context: Context, @DrawableRes vectorResId: Int, 
         BitmapDescriptorFactory.defaultMarker()
     }
 }
+
+

@@ -59,6 +59,14 @@ class SocketService @Inject constructor(
     private var reconnectJob: Job? = null
     private var isManualDisconnect = false
     
+    // Store room IDs for rejoin after reconnect
+    private var currentCustomerId: String? = null
+    private var currentBookingId: String? = null
+    
+    // Throttling for driver location updates (1-2 seconds for UI)
+    private var lastDriverLocationUpdateTime = 0L
+    private val DRIVER_LOCATION_THROTTLE_MS = 1500L
+    
     companion object {
         private const val TAG = "SocketService"
         // private const val SOCKET_URL = "http://10.10.60.196:3000"
@@ -167,6 +175,15 @@ class SocketService @Inject constructor(
             connectionAttempts = 0
             isReconnecting = false
             updateConnectionStatus(true)
+            
+            // CRITICAL: Join user room with user ID (for general notifications)
+            // Backend contract: Authentication does NOT subscribe to updates, must join room
+            joinUserRoom()
+            
+            // CRITICAL: Rejoin ride room if we have an active ride
+            // Backend contract: Room membership is LOST on reconnect, must rejoin
+            // This ensures driver.location.update continues to arrive after reconnect
+            rejoinRideRoomIfNeeded()
         }
         
         socket?.on(Socket.EVENT_DISCONNECT) { args ->
@@ -192,6 +209,13 @@ class SocketService @Inject constructor(
                 data?.let { json ->
                     Timber.d("Received connection confirmation: ${json.toString()}")
                 }
+                
+                // Join user room after connection confirmation (matching iOS behavior)
+                joinUserRoom()
+                
+                // CRITICAL: Rejoin ride room if we have an active ride
+                // Backend contract: Room membership is LOST on reconnect, must rejoin
+                rejoinRideRoomIfNeeded()
             } catch (e: Exception) {
                 Timber.e(e, "Error processing connected event")
             }
@@ -232,11 +256,61 @@ class SocketService @Inject constructor(
             }
         }
         
-        // CORRECTED: Driver location updates (with dots)
-        socket?.on("driver.location.update") { args ->
+        // Listen for room join confirmation from backend
+        socket?.on("room-joined") { args ->
             try {
                 val data = args[0] as? JSONObject
                 data?.let { json ->
+                    val room = json.optString("room", "")
+                    Timber.d("✅ Room joined successfully: $room")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error processing room-joined event")
+            }
+        }
+        
+        // CORRECTED: Driver location updates (with dots)
+        // Backend contract: io.to(customerId).emit("driver.location.update", payload)
+        // This event is ONLY received if client is in the correct room
+        // Backend code: this.io.to(customerId).emit('driver.location.update', payload)
+        socket?.on("driver.location.update") { args ->
+            try {
+                Timber.d("📡 [DRIVER_LOCATION] ✅ RECEIVED driver.location.update event!")
+                Timber.d("📡 [DRIVER_LOCATION] Args: ${args.contentToString()}")
+                Timber.d("📡 [DRIVER_LOCATION] Args count: ${args.size}, types: ${args.map { it?.javaClass?.simpleName }}")
+                
+                // Handle both array and single object formats
+                val data = when {
+                    args.isNotEmpty() && args[0] is JSONObject -> args[0] as JSONObject
+                    args.isNotEmpty() && args[0] is String -> JSONObject(args[0] as String)
+                    else -> null
+                }
+                
+                data?.let { json ->
+                    Timber.d("📡 Parsing driver location update: ${json.toString()}")
+                    
+                    // Extract bookingId with comprehensive handling
+                    val bookingIdStr = try {
+                        val bookingIdValue = json.opt("bookingId") ?: json.opt("booking_id")
+                        when {
+                            bookingIdValue is String -> bookingIdValue.ifBlank { null }
+                            bookingIdValue is Int -> bookingIdValue.toString()
+                            bookingIdValue is Double -> bookingIdValue.toInt().toString()
+                            bookingIdValue is Long -> bookingIdValue.toString()
+                            bookingIdValue != null -> bookingIdValue.toString().ifBlank { null }
+                            else -> {
+                                val str1 = json.optString("bookingId", "")
+                                val str2 = json.optString("booking_id", "")
+                                (if (str1.isNotBlank()) str1 else str2).ifBlank { null }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Timber.e(e, "Error extracting bookingId")
+                        null
+                    }
+                    
+                    Timber.d("📡 Extracted bookingId: '$bookingIdStr'")
+                    
                     val driverUpdate = DriverLocationUpdate(
                         driverId = json.optString("userId") ?: json.optString("driver_id", ""),
                         latitude = json.optDouble("latitude", 0.0),
@@ -244,10 +318,10 @@ class SocketService @Inject constructor(
                         heading = json.optDouble("heading", 0.0),
                         speed = json.optDouble("speed", 0.0),
                         timestamp = json.optLong("timestamp", 0L),
-                        bookingId = json.optString("booking_id") ?: json.optString("bookingId", null)
+                        bookingId = bookingIdStr
                     )
                     updateDriverLocation(driverUpdate)
-                }
+                } ?: Timber.w("📡 driver.location.update event received but data is null or not JSONObject. Args: ${args.contentToString()}")
             } catch (e: Exception) {
                 Timber.e(e, "Error processing driver location update")
             }
@@ -311,6 +385,32 @@ class SocketService @Inject constructor(
                     Timber.d("Created ActiveRide: bookingId=${activeRide.bookingId}, status=${activeRide.status}")
                     _activeRide.value = activeRide
 
+                    // Backend contract: driver.location.update is ONLY emitted to room members
+                    // Room priority: customerId (PRIMARY) > bookingId (FALLBACK)
+                    // Join customerId room (PRIMARY) - backend emits to this room primarily
+                    joinRideRoom(activeRide.customerId, activeRide.bookingId)
+                    
+                    // SAFETY: Also join bookingId room as fallback (matching Angular behavior)
+                    // Backend may emit to bookingId room in some cases, so join both for safety
+                    if (activeRide.bookingId.isNotBlank()) {
+                        activeRide.bookingId.toIntOrNull()?.let { bookingId ->
+                            joinBookingRoom(bookingId)
+                            Timber.d("🔷 Also joined bookingId room (FALLBACK): $bookingId")
+                            
+                            // Request driver location after a short delay to ensure room join is processed
+                            // Some backends require explicit request to start emitting location updates
+                            scope.launch {
+                                delay(500) // Small delay to ensure room join is processed
+                                requestDriverLocation(bookingId)
+                                Timber.d("📡 Requested driver location for booking: $bookingId")
+                            }
+                        }
+                    }
+                    
+                    // Store room IDs for rejoin on reconnect
+                    currentCustomerId = activeRide.customerId.ifBlank { null }
+                    currentBookingId = activeRide.bookingId.ifBlank { null }
+
                     // Auto-navigation (bug #3): if app is foregrounded, jump to live ride immediately.
                     if (appForegroundTracker.isInForeground.value) {
                         navigationEventBus.tryEmit(NavEvent.ToLiveRide(bookingId = activeRide.bookingId))
@@ -362,12 +462,132 @@ class SocketService @Inject constructor(
         }
     }
     
+    /**
+     * Join user room with user ID (matching iOS behavior)
+     * Backend contract: Authentication validates identity but does NOT subscribe to updates
+     * This joins the user's general notification room
+     */
+    private fun joinUserRoom() {
+        try {
+            val token = tokenManager.getAccessToken()
+            if (token == null) {
+                Timber.w("Cannot join user room - no authentication token available")
+                return
+            }
+            
+            val userId = extractUserIdFromToken(token) ?: "unknown"
+            if (userId == "unknown") {
+                Timber.w("Cannot join user room - user ID is unknown")
+                return
+            }
+            
+            if (socket?.connected() != true) {
+                Timber.w("Cannot join user room - socket is not connected")
+                return
+            }
+            
+            // Emit join-room event with user ID (matching iOS: {"room": userId})
+            socket?.emit("join-room", JSONObject().apply {
+                put("room", userId)
+            })
+            Timber.d("🔷 Joined user room: $userId")
+        } catch (e: Exception) {
+            Timber.e(e, "Error joining user room")
+        }
+    }
+    
+    /**
+     * Join ride room for driver location updates
+     * Backend contract: driver.location.update is ONLY emitted to room members
+     * Priority: customerId (PRIMARY) > bookingId (FALLBACK)
+     * 
+     * CRITICAL: Backend emits driver.location.update ONLY to the room specified
+     * If client is not in the room, events are silently dropped (no error)
+     * 
+     * @param customerId Preferred room ID (customer's user ID) - PRIMARY
+     * @param bookingId Fallback room ID if customerId is unavailable - FALLBACK
+     */
+    private fun joinRideRoom(customerId: String, bookingId: String) {
+        try {
+            if (socket?.connected() != true) {
+                Timber.w("❌ Cannot join ride room - socket is not connected")
+                return
+            }
+            
+            // Backend contract: customerId is PRIMARY, bookingId is FALLBACK
+            // Backend logic: io.to(customerId).emit(...) OR io.to(bookingId).emit(...)
+            // IMPORTANT: Backend expects room as STRING (see backend handleJoinRoom: room: string)
+            val roomId = when {
+                customerId.isNotBlank() -> {
+                    Timber.d("🔷 Joining ride room with customerId (PRIMARY): $customerId")
+                    customerId // Use as string
+                }
+                bookingId.isNotBlank() -> {
+                    Timber.d("🔷 Joining ride room with bookingId (FALLBACK): $bookingId")
+                    bookingId // Use as string
+                }
+                else -> {
+                    Timber.w("❌ Cannot join ride room - both customerId and bookingId are empty")
+                    return
+                }
+            }
+            
+            // Emit join-room event (backend expects: socket.emit("join-room", { room: "<room_id>" }))
+            // Backend handleJoinRoom accepts room: string, so always send as string
+            socket?.emit("join-room", JSONObject().apply {
+                put("room", roomId) // Always send as string to match backend contract
+            })
+            Timber.d("📡 Now listening for driver.location.update events in room: $roomId")
+        } catch (e: Exception) {
+            Timber.e(e, "❌ Error joining ride room")
+        }
+    }
+    
+    /**
+     * Rejoin ride room after reconnect
+     * Backend contract: Room membership is LOST on reconnect, must rejoin
+     * This ensures driver.location.update continues to arrive after reconnect
+     */
+    private fun rejoinRideRoomIfNeeded() {
+        val activeRide = _activeRide.value
+        if (activeRide != null) {
+            // Rejoin using stored room IDs or active ride data
+            val customerId = currentCustomerId ?: activeRide.customerId
+            val bookingId = currentBookingId ?: activeRide.bookingId
+            
+            // Rejoin customerId room (PRIMARY)
+            joinRideRoom(customerId, bookingId)
+            
+            // SAFETY: Also rejoin bookingId room as fallback (matching Angular behavior)
+            if (bookingId.isNotBlank()) {
+                bookingId.toIntOrNull()?.let { bookingIdInt ->
+                    joinBookingRoom(bookingIdInt)
+                    // Request driver location after rejoin to ensure updates resume
+                    scope.launch {
+                        delay(500) // Small delay to ensure room join is processed
+                        requestDriverLocation(bookingIdInt)
+                        Timber.d("📡 Requested driver location after reconnect for booking: $bookingIdInt")
+                    }
+                }
+            }
+            
+            Timber.d("🔄 Rejoined ride rooms after reconnect (customerId=$customerId, bookingId=$bookingId)")
+        }
+    }
+    
     // CORRECTED: Join room with proper event name
+    // NOTE: This is a legacy method - prefer joinRideRoom() which handles customerId/bookingId priority
     fun joinBookingRoom(bookingId: Int) {
         try {
+            if (socket?.connected() != true) {
+                Timber.w("Cannot join booking room - socket is not connected")
+                return
+            }
+            val roomId = bookingId.toString()
             socket?.emit("join-room", JSONObject().apply {
-                put("room", bookingId.toString())
+                put("room", roomId) // Backend expects string
             })
+            Timber.d("🔷 Joined booking room: $roomId (bookingId: $bookingId)")
         } catch (e: Exception) {
             Timber.e(e, "Error joining booking room")
         }
@@ -378,6 +598,7 @@ class SocketService @Inject constructor(
             socket?.emit("leave-room", JSONObject().apply {
                 put("room", bookingId.toString())
             })
+            Timber.d("Left booking room: $bookingId")
         } catch (e: Exception) {
             Timber.e(e, "Error leaving booking room")
         }
@@ -395,9 +616,15 @@ class SocketService @Inject constructor(
     // Request driver location for a specific booking
     fun requestDriverLocation(bookingId: Int) {
         try {
-            socket?.emit("request_driver_location", JSONObject().apply {
+            if (socket?.connected() != true) {
+                Timber.w("❌ Cannot request driver location - socket is not connected")
+                return
+            }
+            val requestData = JSONObject().apply {
                 put("bookingId", bookingId)
-            })
+            }
+            socket?.emit("request_driver_location", requestData)
+            Timber.d("📡 Emitted request_driver_location event for bookingId: $bookingId")
         } catch (e: Exception) {
             Timber.e(e, "Error requesting driver location")
         }
@@ -417,16 +644,32 @@ class SocketService @Inject constructor(
     }
     
     private fun updateDriverLocation(driverUpdate: DriverLocationUpdate) {
-        val currentLocations = _driverLocations.value.toMutableList()
-        val existingIndex = currentLocations.indexOfFirst { it.driverId == driverUpdate.driverId }
+        // Throttle updates to prevent excessive processing
+        val now = System.currentTimeMillis()
+        val timeSinceLastUpdate = now - lastDriverLocationUpdateTime
         
-        if (existingIndex >= 0) {
-            currentLocations[existingIndex] = driverUpdate
-        } else {
-            currentLocations.add(driverUpdate)
+        if (timeSinceLastUpdate < DRIVER_LOCATION_THROTTLE_MS) {
+            Timber.d("📡 Throttling driver location update (${timeSinceLastUpdate}ms < ${DRIVER_LOCATION_THROTTLE_MS}ms)")
+            return
         }
         
-        _driverLocations.value = currentLocations
+        lastDriverLocationUpdateTime = now
+        
+        try {
+            val currentLocations = _driverLocations.value.toMutableList()
+            val existingIndex = currentLocations.indexOfFirst { it.driverId == driverUpdate.driverId }
+            
+            if (existingIndex >= 0) {
+                currentLocations[existingIndex] = driverUpdate
+            } else {
+                currentLocations.add(driverUpdate)
+            }
+            
+            _driverLocations.value = currentLocations
+            Timber.d("📡 Driver location updated: ${driverUpdate.driverId}, lat=${driverUpdate.latitude}, lng=${driverUpdate.longitude}, bookingId=${driverUpdate.bookingId}")
+        } catch (e: Exception) {
+            Timber.e(e, "Error updating driver location")
+        }
     }
 
     private fun UserNotification.toNotificationPayload(): NotificationPayload {
@@ -577,6 +820,31 @@ class SocketService @Inject constructor(
                 )
                 
                 _activeRide.value = activeRide
+                
+                // Backend contract: driver.location.update is ONLY emitted to room members
+                // Join customerId room (PRIMARY)
+                joinRideRoom(activeRide.customerId, activeRide.bookingId)
+                
+                // SAFETY: Also join bookingId room as fallback (matching Angular behavior)
+                if (activeRide.bookingId.isNotBlank()) {
+                    activeRide.bookingId.toIntOrNull()?.let { bookingId ->
+                        joinBookingRoom(bookingId)
+                        Timber.d("🔷 Also joined bookingId room (FALLBACK): $bookingId")
+                        
+                        // Request driver location after a short delay to ensure room join is processed
+                        // Some backends require explicit request to start emitting location updates
+                        scope.launch {
+                            delay(500) // Small delay to ensure room join is processed
+                            requestDriverLocation(bookingId)
+                            Timber.d("📡 Requested driver location for booking: $bookingId")
+                        }
+                    }
+                }
+                
+                // Store room IDs for rejoin on reconnect
+                currentCustomerId = activeRide.customerId.ifBlank { null }
+                currentBookingId = activeRide.bookingId.ifBlank { null }
+                
                 Timber.d("🚗 Active ride data updated from live_ride notification - bookingId: $bookingId, driver: ${driverName}, phone: ${driverPhone}, status: $status")
 
                 // Auto-navigation (bug #3): if app is foregrounded, jump to live ride immediately.
@@ -638,15 +906,6 @@ class SocketService @Inject constructor(
         reconnectJob?.cancel()
         disconnectInternal()
         scope.cancel()
-    }
-    
-    /**
-     * TEMPORARY TEST METHOD - REMOVE AFTER TESTING
-     * Allows testing live ride screen without socket connection
-     */
-    fun setTestActiveRide(testRide: ActiveRide) {
-        _activeRide.value = testRide
-        Timber.d("📱 Test active ride set: ${testRide.bookingId}")
     }
     
     /**

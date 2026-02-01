@@ -1906,7 +1906,7 @@ fun ComprehensiveBookingScreen(
                         val (distanceMeters, durationSeconds) = directionsService.calculateDistance(
                             airportLat, airportLong,
                             currentRideData.destinationLat!!, currentRideData.destinationLong!!
-                        )
+                        ) ?: Pair(0, 0)
                         val (distanceText, _) = directionsService.formatDistance(distanceMeters)
                         val (durationText, _) = directionsService.formatDuration(durationSeconds)
                         outboundDistance = Pair(distanceText, durationText)
@@ -1975,7 +1975,7 @@ fun ComprehensiveBookingScreen(
                         val (distanceMeters, durationSeconds) = directionsService.calculateDistance(
                             currentRideData.pickupLat!!, currentRideData.pickupLong!!,
                             airportLat, airportLong
-                        )
+                        ) ?: Pair(0, 0)
                         val (distanceText, _) = directionsService.formatDistance(distanceMeters)
                         val (durationText, _) = directionsService.formatDuration(durationSeconds)
                         outboundDistance = Pair(distanceText, durationText)
@@ -2420,7 +2420,7 @@ fun ComprehensiveBookingScreen(
                             effectivePickupCoord.first!!, effectivePickupCoord.second!!,
                             effectiveDropoffCoord.first!!, effectiveDropoffCoord.second!!,
                             waypointPairs.takeIf { it.isNotEmpty() }
-                        )
+                        ) ?: Pair(0, 0)
 
                         val (distanceText, _) = directionsService.formatDistance(distanceMeters)
                         val (durationText, _) = directionsService.formatDuration(durationSeconds)
@@ -2527,7 +2527,7 @@ fun ComprehensiveBookingScreen(
                             effectiveReturnPickupCoord.first!!, effectiveReturnPickupCoord.second!!,
                             effectiveReturnDropoffCoord.first!!, effectiveReturnDropoffCoord.second!!,
                             waypointPairs
-                        )
+                        ) ?: Pair(0, 0)
                         val (returnDistanceText, _) = directionsService.formatDistance(returnDistanceMeters)
                         val (returnDurationText, _) = directionsService.formatDuration(returnDurationSeconds)
                         val previousReturnDistance = returnDistance

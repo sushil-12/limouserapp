@@ -89,7 +89,7 @@ private fun TopHeaderView(invoice: Invoice) {
                 modifier = Modifier.size(16.dp)
             )
             Text(
-                text = invoice.formattedDate,
+                text = invoice.formattedDate.ifEmpty { "" },
                 style = TextStyle(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -100,7 +100,7 @@ private fun TopHeaderView(invoice: Invoice) {
         
         // Right side - Vehicle type button
         Text(
-            text = invoice.vehicleType,
+            text = invoice.vehicleType.orEmpty(),
             style = TextStyle(
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
@@ -142,13 +142,13 @@ private fun InvoiceSummaryView(invoice: Invoice) {
         
         // Payment Status
         Text(
-            text = invoice.status.replaceFirstChar { 
-                if (it.isLowerCase()) it.titlecase() else it.toString() 
+            text = (invoice.status.orEmpty()).replaceFirstChar {
+                if (it.isLowerCase()) it.titlecase() else it.toString()
             },
             style = TextStyle(
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = getStatusColor(invoice.status)
+                color = getStatusColor(invoice.status.orEmpty())
             )
         )
         
@@ -214,7 +214,7 @@ private fun RouteDetailsView(invoice: Invoice) {
         ) {
             // Pickup location
             Text(
-                text = invoice.pickupAddress,
+                text = invoice.pickupAddress.orEmpty(),
                 style = TextStyle(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
@@ -225,7 +225,7 @@ private fun RouteDetailsView(invoice: Invoice) {
             
             // Dropoff location
             Text(
-                text = invoice.dropoffAddress,
+                text = invoice.dropoffAddress.orEmpty(),
                 style = TextStyle(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
@@ -262,7 +262,7 @@ private fun DriverInfoView(
         
         // Driver name
         Text(
-            text = invoice.driverName,
+            text = invoice.driverName.orEmpty(),
             style = TextStyle(
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
@@ -293,11 +293,11 @@ private fun DriverInfoView(
         // Driver phone - tappable
         TextButton(
             onClick = {
-                onDriverPhoneClick?.invoke(invoice.driverPhone)
+                invoice.driverPhone?.let { onDriverPhoneClick?.invoke(it) }
             }
         ) {
             Text(
-                text = invoice.driverPhone,
+                text = invoice.driverPhone.orEmpty(),
                 style = TextStyle(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
@@ -358,6 +358,6 @@ private fun getStatusColor(status: String): Color {
 }
 
 private fun shouldUseTallLine(invoice: Invoice): Boolean {
-    return invoice.pickupAddress.length > 30 || invoice.dropoffAddress.length > 30
+    return (invoice.pickupAddress?.length ?: 0) > 30 || (invoice.dropoffAddress?.length ?: 0) > 30
 }
 

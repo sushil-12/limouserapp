@@ -2,6 +2,7 @@ package com.example.limouserapp.ui.components
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -17,19 +18,28 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * Shimmer effect colors
+ * Shimmer effect colors - lighter version
  */
 private val shimmerColors = listOf(
-    Color.White.copy(alpha = 0.3f),
-    Color.White.copy(alpha = 0.6f),
-    Color.White.copy(alpha = 0.3f)
+    Color.White.copy(alpha = 0.2f),
+    Color.White.copy(alpha = 0.4f),
+    Color.White.copy(alpha = 0.2f)
+)
+
+/**
+ * Lighter shimmer effect colors for subtle loading
+ */
+private val lightShimmerColors = listOf(
+    Color.White.copy(alpha = 0.1f),
+    Color.White.copy(alpha = 0.2f),
+    Color.White.copy(alpha = 0.1f)
 )
 
 /**
  * Base shimmer modifier that applies the shimmer animation
  */
 @Composable
-fun Modifier.shimmerEffect(): Modifier {
+fun Modifier.shimmerEffect(light: Boolean = false): Modifier {
     val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
     val shimmerTranslateAnim by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -44,10 +54,12 @@ fun Modifier.shimmerEffect(): Modifier {
         label = "shimmer_translate"
     )
 
+    val colors = if (light) lightShimmerColors else shimmerColors
+
     return this.then(
         Modifier.background(
             brush = Brush.linearGradient(
-                colors = shimmerColors,
+                colors = colors,
                 start = Offset(shimmerTranslateAnim - 400f, shimmerTranslateAnim - 400f),
                 end = Offset(shimmerTranslateAnim, shimmerTranslateAnim)
             )
@@ -61,13 +73,14 @@ fun Modifier.shimmerEffect(): Modifier {
 @Composable
 fun ShimmerBox(
     modifier: Modifier = Modifier,
-    shape: androidx.compose.foundation.shape.RoundedCornerShape = RoundedCornerShape(8.dp)
+    shape: androidx.compose.foundation.shape.RoundedCornerShape = RoundedCornerShape(8.dp),
+    light: Boolean = true // Default to lighter shimmers
 ) {
     Box(
         modifier = modifier
             .clip(shape)
-            .background(Color.Gray.copy(alpha = 0.2f))
-            .shimmerEffect()
+            .background(Color.Gray.copy(alpha = if (light) 0.15f else 0.2f))
+            .shimmerEffect(light = light)
     )
 }
 
@@ -138,9 +151,9 @@ fun ShimmerListItem(
                 .size(48.dp)
                 .clip(RoundedCornerShape(8.dp))
         )
-        
+
         Spacer(modifier = Modifier.width(12.dp))
-        
+
         // Text content
         Column(modifier = Modifier.weight(1f)) {
             ShimmerText(
@@ -154,5 +167,53 @@ fun ShimmerListItem(
             )
         }
     }
+}
+
+/**
+ * Circular shimmer component - replaces CircularProgressIndicator
+ */
+@Composable
+fun ShimmerCircle(
+    modifier: Modifier = Modifier,
+    size: androidx.compose.ui.unit.Dp = 24.dp,
+    strokeWidth: androidx.compose.ui.unit.Dp = 2.dp,
+    light: Boolean = true
+) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .shimmerEffect(light = light)
+            .background(Color.Transparent)
+            .border(
+                width = strokeWidth,
+                brush = Brush.linearGradient(
+                    colors = if (light) lightShimmerColors else shimmerColors
+                ),
+                shape = androidx.compose.foundation.shape.CircleShape
+            )
+    )
+}
+
+
+/**
+ * Button shimmer - for loading states in buttons
+ */
+@Composable
+fun ShimmerButton(
+    modifier: Modifier = Modifier,
+    height: androidx.compose.ui.unit.Dp = 50.dp,
+    width: androidx.compose.ui.unit.Dp? = null
+) {
+    val buttonModifier = if (width != null) {
+        modifier.width(width).height(height)
+    } else {
+        modifier.fillMaxWidth().height(height)
+    }
+
+    ShimmerBox(
+        modifier = buttonModifier,
+        shape = RoundedCornerShape(50)
+    )
 }
 

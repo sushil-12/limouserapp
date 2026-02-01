@@ -23,6 +23,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 import android.os.Build
 import androidx.compose.animation.AnimatedContentTransitionScope
@@ -35,7 +36,6 @@ import androidx.navigation.navArgument
 import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.limouserapp.ui.OnboardingScreen
-import com.example.limouserapp.ui.SplashScreen
 import com.example.limouserapp.ui.PhoneEntryScreen
 import com.example.limouserapp.ui.OtpScreen
 import com.example.limouserapp.ui.AddBasicDetailsScreen
@@ -68,7 +68,6 @@ import com.example.limouserapp.ui.NotificationScreen
 import com.example.limouserapp.ui.AccountSettingsScreen
 import com.example.limouserapp.ui.theme.LimoOrange
 import com.example.limouserapp.ui.theme.LimoBlack
-import com.example.limouserapp.ui.viewmodel.SplashViewModel
 import com.example.limouserapp.ui.viewmodel.PhoneEntryViewModel
 import com.example.limouserapp.ui.viewmodel.OtpViewModel
 import com.example.limouserapp.ui.viewmodel.BasicDetailsViewModel
@@ -81,12 +80,18 @@ import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import com.example.limouserapp.ui.navigation.NavEvent
 import com.example.limouserapp.ui.navigation.NavigationEventBus
+import com.example.limouserapp.ui.navigation.AuthNavigationEvent
+import com.example.limouserapp.ui.navigation.AuthNavigationState
+import com.example.limouserapp.ui.navigation.AuthStateManager
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var navigationEventBus: NavigationEventBus
+    
+    @Inject
+    lateinit var authStateManager: AuthStateManager
     
     // Permission request launchers
     private val locationPermissionLauncher = registerForActivityResult(
@@ -115,6 +120,9 @@ class MainActivity : ComponentActivity() {
     val hasLocationPermission: State<Boolean> = _hasLocationPermission
     
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Install splash screen before super.onCreate()
+        installSplashScreen()
+        
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
@@ -206,7 +214,6 @@ class MainActivity : ComponentActivity() {
 }
 
 private object Routes {
-    const val Splash = "splash"
     const val Onboarding = "onboarding"
     const val Phone = "phone"
     const val Otp = "otp"
@@ -228,6 +235,8 @@ private object Routes {
     const val LiveRide = "live_ride/{bookingId}"
     const val Chat = "chat"
     const val Notifications = "notifications"
+    const val Faq = "faq"
+    const val Tutorials = "tutorials"
     const val Success = "success"
     const val TermsOfUse = "terms_of_use"
     const val PrivacyPolicy = "privacy_policy"
@@ -241,7 +250,7 @@ private fun AppNavHost(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    
+
     // Get LoadingStateManager from application context via Hilt EntryPoint
     val loadingStateManager = remember {
         EntryPointAccessors.fromApplication(
@@ -249,7 +258,7 @@ private fun AppNavHost(
             LoadingStateManagerEntryPoint::class.java
         ).loadingStateManager()
     }
-    
+
     // Get LogoutUseCase from application context via Hilt EntryPoint
     val logoutUseCase = remember {
         EntryPointAccessors.fromApplication(
@@ -257,13 +266,13 @@ private fun AppNavHost(
             LogoutUseCaseEntryPoint::class.java
         ).logoutUseCase()
     }
-    
+
     // Observe loading state
     val isLoading by loadingStateManager.isLoading.collectAsStateWithLifecycle()
-    
+
     // Get current destination to conditionally show loading overlay
     val currentDestination = navController.currentDestination?.route
-    
+
     val socketService: SocketService? = try {
         val app = context.applicationContext as? com.example.limouserapp.LimoApplication
         app?.socketService
@@ -292,6 +301,7 @@ private fun AppNavHost(
                         }
                     }
                 }
+
                 is NavEvent.ToChat -> {
                     navController.navigate("${Routes.Chat}/${event.bookingId}") {
                         launchSingleTop = true
@@ -300,826 +310,1019 @@ private fun AppNavHost(
             }
         }
     }
-    
-    Box(modifier = Modifier.fillMaxSize()) {
-        NavHost(navController = navController, startDestination = Routes.Splash) {
-            composable(Routes.Splash) {
-                SplashScreenWithViewModel(navController = navController)
-            }
-            composable(Routes.Onboarding) {
-                OnboardingScreen(onGetStarted = { navController.navigate(Routes.Phone) })
-            }
-            composable(Routes.Phone) {
-                PhoneEntryScreenWithViewModel(navController = navController)
-            }
-            composable(Routes.Otp) {
-                OtpScreenWithViewModel(navController = navController)
-            }
-            composable(Routes.BasicDetails) {
-                BasicDetailsScreenWithViewModel(navController = navController)
-            }
-            composable(Routes.TermsOfUse) {
-                WebViewScreen(
-                    url = "https://1800limoco.infodevbox.com/client-terms-condition",
-                    title = "Terms of Use",
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-            composable(Routes.PrivacyPolicy) {
-                WebViewScreen(
-                    url = "https://1800limoco.infodevbox.com/privacy-policy",
-                    title = "Privacy Policy",
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-            composable(Routes.CreditCard) {
-                CreditCardScreenWithViewModel(navController = navController)
-            }
-            // Dashboard route with optional editBookingId, repeatBookingId, isReturnFlow, and openDrawer parameters
-            composable(
-                route = "${Routes.Dashboard}?editBookingId={editBookingId}&repeatBookingId={repeatBookingId}&isReturnFlow={isReturnFlow}&openDrawer={openDrawer}",
-                arguments = listOf(
-                    navArgument("editBookingId") {
-                        type = NavType.IntType
-                        defaultValue = -1
-                    },
-                    navArgument("repeatBookingId") {
-                        type = NavType.IntType
-                        defaultValue = -1
-                    },
-                    navArgument("isReturnFlow") {
-                        type = NavType.BoolType
-                        defaultValue = false
-                    },
-                    navArgument("openDrawer") {
-                        type = NavType.BoolType
-                        defaultValue = false
-                    }
-                )
-            ) { backStackEntry ->
-                val editBookingIdArg = backStackEntry.arguments?.getInt("editBookingId") ?: -1
-                val initialEditBookingId = if (editBookingIdArg > 0) editBookingIdArg else null
-                val repeatBookingIdArg = backStackEntry.arguments?.getInt("repeatBookingId") ?: -1
-                val initialRepeatBookingId = if (repeatBookingIdArg > 0) repeatBookingIdArg else null
-                val initialIsReturnFlow = backStackEntry.arguments?.getBoolean("isReturnFlow") ?: false
-                val shouldOpenDrawer = backStackEntry.arguments?.getBoolean("openDrawer") ?: false
-                
-                DashboardScreenWithPermissions(
-                    navController = navController,
-                    onNavigateToProfile = { /* TODO: Implement profile navigation */ },
-                    onNavigateToBookings = { navController.navigate(Routes.MyBookings) },
-                    onNavigateToSettings = { navController.navigate(Routes.AccountSettings) },
-                    onNavigateToCreateBooking = { /* TODO: Implement create booking navigation */ },
-                    onNavigateToMyCards = { navController.navigate(Routes.MyCards) },
-                    onNavigateToInvoices = { navController.navigate(Routes.Invoices) },
-                    onNavigateToEditBooking = { bookingId ->
-                        // Edit booking is handled within DashboardScreen
-                        // This callback is kept for consistency but not used
-                    },
-                    onNavigateToScheduleRide = { navController.navigate(Routes.ScheduleRide) },
-                    initialEditBookingId = initialEditBookingId,
-                    initialRepeatBookingId = initialRepeatBookingId,
-                    initialIsReturnFlow = initialIsReturnFlow,
-                    shouldOpenDrawer = shouldOpenDrawer,
-                    onLogout = {
-                        coroutineScope.launch {
-                            // Execute logout use case to clear all user data and services
-                            logoutUseCase()
-                            
-                            // Navigate directly to login screen (phone entry) and clear entire back stack
+
+
+    // Observe auth state and determine initial destination
+    val authNavigationState by mainActivity.authStateManager.navigationState.collectAsStateWithLifecycle()
+    val initialDestination = when (authNavigationState) {
+        AuthNavigationState.Onboarding -> Routes.Onboarding
+        AuthNavigationState.PhoneEntry -> Routes.Phone
+        AuthNavigationState.OtpVerification -> Routes.Otp
+        AuthNavigationState.BasicDetails -> Routes.BasicDetails
+        AuthNavigationState.CreditCard -> Routes.CreditCard
+        AuthNavigationState.Dashboard -> Routes.Dashboard
+        AuthNavigationState.Success -> Routes.Success
+        else -> Routes.Onboarding // Default to onboarding while loading
+    }
+
+    // Only show NavHost when we have determined the destination
+    if (authNavigationState != AuthNavigationState.Loading) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            NavHost(navController = navController, startDestination = initialDestination) {
+                composable(Routes.Onboarding) {
+                    OnboardingScreen(onGetStarted = { navController.navigate(Routes.Phone) })
+                }
+                composable(Routes.Phone) {
+                    PhoneEntryScreenWithViewModel(navController = navController)
+                }
+                composable(Routes.Otp) {
+                    OtpScreenWithViewModel(navController = navController)
+                }
+                composable(Routes.BasicDetails) {
+                    BasicDetailsScreenWithViewModel(navController = navController)
+                }
+                composable(Routes.TermsOfUse) {
+                    WebViewScreen(
+                        url = "https://1800limoco.infodevbox.com/client-terms-condition",
+                        title = "Terms of Use",
+                        onBackClick = { navController.popBackStack() }
+                    )
+                }
+                composable(Routes.PrivacyPolicy) {
+                    WebViewScreen(
+                        url = "https://1800limoco.infodevbox.com/privacy-policy",
+                        title = "Privacy Policy",
+                        onBackClick = { navController.popBackStack() }
+                    )
+                }
+                composable(Routes.CreditCard) {
+                    CreditCardScreenWithViewModel(navController = navController)
+                }
+                // Dashboard route with optional editBookingId, repeatBookingId, isReturnFlow, and openDrawer parameters
+                composable(
+                    route = "${Routes.Dashboard}?editBookingId={editBookingId}&repeatBookingId={repeatBookingId}&isReturnFlow={isReturnFlow}&openDrawer={openDrawer}",
+                    arguments = listOf(
+                        navArgument("editBookingId") {
+                            type = NavType.IntType
+                            defaultValue = -1
+                        },
+                        navArgument("repeatBookingId") {
+                            type = NavType.IntType
+                            defaultValue = -1
+                        },
+                        navArgument("isReturnFlow") {
+                            type = NavType.BoolType
+                            defaultValue = false
+                        },
+                        navArgument("openDrawer") {
+                            type = NavType.BoolType
+                            defaultValue = false
+                        }
+                    )
+                ) { backStackEntry ->
+                    val editBookingIdArg = backStackEntry.arguments?.getInt("editBookingId") ?: -1
+                    val initialEditBookingId = if (editBookingIdArg > 0) editBookingIdArg else null
+                    val repeatBookingIdArg =
+                        backStackEntry.arguments?.getInt("repeatBookingId") ?: -1
+                    val initialRepeatBookingId =
+                        if (repeatBookingIdArg > 0) repeatBookingIdArg else null
+                    val initialIsReturnFlow =
+                        backStackEntry.arguments?.getBoolean("isReturnFlow") ?: false
+                    val shouldOpenDrawer =
+                        backStackEntry.arguments?.getBoolean("openDrawer") ?: false
+
+                    DashboardScreenWithPermissions(
+                        navController = navController,
+                        onNavigateToProfile = { /* TODO: Implement profile navigation */ },
+                        onNavigateToBookings = { navController.navigate(Routes.MyBookings) },
+                        onNavigateToSettings = { navController.navigate(Routes.AccountSettings) },
+                        onNavigateToCreateBooking = { /* TODO: Implement create booking navigation */ },
+                        onNavigateToMyCards = { navController.navigate(Routes.MyCards) },
+                        onNavigateToInvoices = { navController.navigate(Routes.Invoices) },
+                        onNavigateToEditBooking = { bookingId ->
+                            // Edit booking is handled within DashboardScreen
+                            // This callback is kept for consistency but not used
+                        },
+                        onNavigateToScheduleRide = { navController.navigate(Routes.ScheduleRide) },
+                        initialEditBookingId = initialEditBookingId,
+                        initialRepeatBookingId = initialRepeatBookingId,
+                        initialIsReturnFlow = initialIsReturnFlow,
+                        shouldOpenDrawer = shouldOpenDrawer,
+                        onLogout = {
+                            // Navigate to Phone first so user never sees Dashboard again (no glimpse)
                             navController.navigate(Routes.Phone) {
-                                // Clear entire navigation back stack by popping up to the graph root
                                 popUpTo(navController.graph.id) { inclusive = true }
-                                // Prevent multiple instances of the same screen
                                 launchSingleTop = true
                             }
+                            coroutineScope.launch {
+                                logoutUseCase()
+                                // Keep auth state at PhoneEntry so NavHost doesn't flip to Onboarding on recomposition
+                                mainActivity.authStateManager.handleNavigationEvent(AuthNavigationEvent.NavigateToPhoneEntry)
+                            }
+                        },
+                        onNavigateToLiveRide = { bookingId ->
+                            val route = if (bookingId != null) {
+                                "live_ride/$bookingId"
+                            } else {
+                                "live_ride/default" // Fallback
+                            }
+                            navController.navigate(route)
+                        },
+                        onNavigateToNotifications = { navController.navigate(Routes.Notifications) },
+                        onNavigateToFaq = { navController.navigate(Routes.Faq) },
+                        onNavigateToTutorials = { navController.navigate(Routes.Tutorials) },
+                        onViewInvoice = { id ->
+                            navController.navigate("${Routes.InvoiceWebView}/$id")
                         }
+                    )
+                }
+                composable(Routes.Faq) {
+                    com.example.limouserapp.ui.FaqScreen(
+                        onNavigateBack = { navController.popBackStack() }
+                    )
+                }
+                composable(Routes.Tutorials) {
+                    com.example.limouserapp.ui.TutorialsScreen(
+                        onNavigateBack = { navController.popBackStack() }
+                    )
+                }
+                composable(
+                    route = Routes.ScheduleRide,
+                    enterTransition = {
+                        slideIntoContainer(
+                            towards = AnimatedContentTransitionScope.SlideDirection.Up,
+                            animationSpec = tween(durationMillis = 300)
+                        )
                     },
-                    onNavigateToLiveRide = { bookingId ->
-                        val route = if (bookingId != null) {
-                            "live_ride/$bookingId"
-                        } else {
-                            "live_ride/default" // Fallback
+                    exitTransition = {
+                        slideOutOfContainer(
+                            towards = AnimatedContentTransitionScope.SlideDirection.Down,
+                            animationSpec = tween(durationMillis = 300)
+                        )
+                    }
+                ) { backStackEntry ->
+                    com.example.limouserapp.ui.booking.ScheduleRideScreen(
+                        navController = navController,
+                        onDismiss = { navController.popBackStack() },
+                        onNavigateToTimeSelection = { rideData ->
+                            // Navigate to time selection screen with ride data
+                            android.util.Log.d(
+                                "MainActivity",
+                                "ScheduleRide onNavigateToTimeSelection called with: ${rideData.pickupLocation} -> ${rideData.destinationLocation}"
+                            )
+                            navController.navigate(
+                                "${Routes.TimeSelection}?rideData=${
+                                    android.util.Base64.encodeToString(
+                                        Gson().toJson(rideData).toByteArray(),
+                                        android.util.Base64.NO_WRAP
+                                    )
+                                }"
+                            )
                         }
-                        navController.navigate(route)
-                    },
-                    onNavigateToNotifications = { navController.navigate(Routes.Notifications) }
-                )
-            }
-            composable(
-                route = Routes.ScheduleRide,
-                enterTransition = {
-                    slideIntoContainer(
-                        towards = AnimatedContentTransitionScope.SlideDirection.Up,
-                        animationSpec = tween(durationMillis = 300)
-                    )
-                },
-                exitTransition = {
-                    slideOutOfContainer(
-                        towards = AnimatedContentTransitionScope.SlideDirection.Down,
-                        animationSpec = tween(durationMillis = 300)
                     )
                 }
-            ) { backStackEntry ->
-                com.example.limouserapp.ui.booking.ScheduleRideScreen(
-                    navController = navController,
-                    onDismiss = { navController.popBackStack() },
-                    onNavigateToTimeSelection = { rideData ->
-                        // Navigate to time selection screen with ride data
-                        android.util.Log.d("MainActivity", "ScheduleRide onNavigateToTimeSelection called with: ${rideData.pickupLocation} -> ${rideData.destinationLocation}")
-                        navController.navigate("${Routes.TimeSelection}?rideData=${android.util.Base64.encodeToString(Gson().toJson(rideData).toByteArray(), android.util.Base64.NO_WRAP)}")
-                    }
-                )
-            }
-            composable(
-                route = "${Routes.TimeSelection}?rideData={rideData}",
-                arguments = listOf(
-                    navArgument("rideData") {
-                        type = NavType.StringType
-                        nullable = true
-                        defaultValue = null
-                    }
-                )
-            ) { backStackEntry ->
-                val rideDataJson = backStackEntry.arguments?.getString("rideData")
-                val rideData = if (rideDataJson != null) {
-                    try {
-                        Gson().fromJson(String(android.util.Base64.decode(rideDataJson, android.util.Base64.NO_WRAP)), com.example.limouserapp.data.model.booking.RideData::class.java)
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Failed to parse ride data", e)
-                        null
-                    }
-                } else null
+                composable(
+                    route = "${Routes.TimeSelection}?rideData={rideData}",
+                    arguments = listOf(
+                        navArgument("rideData") {
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        }
+                    )
+                ) { backStackEntry ->
+                    val rideDataJson = backStackEntry.arguments?.getString("rideData")
+                    val rideData = if (rideDataJson != null) {
+                        try {
+                            Gson().fromJson(
+                                String(
+                                    android.util.Base64.decode(
+                                        rideDataJson,
+                                        android.util.Base64.NO_WRAP
+                                    )
+                                ), com.example.limouserapp.data.model.booking.RideData::class.java
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Failed to parse ride data", e)
+                            null
+                        }
+                    } else null
 
-                if (rideData != null) {
-                    val context = LocalContext.current
-                    val directionsService = remember {
-                        EntryPointAccessors.fromApplication(
-                            context.applicationContext,
-                            DirectionsServiceEntryPoint::class.java
-                        ).directionsService()
-                    }
+                    if (rideData != null) {
+                        val context = LocalContext.current
+                        val directionsService = remember {
+                            EntryPointAccessors.fromApplication(
+                                context.applicationContext,
+                                DirectionsServiceEntryPoint::class.java
+                            ).directionsService()
+                        }
 
-                    com.example.limouserapp.ui.booking.TimeSelectionScreen(
-                        rideData = rideData,
-                        onDismiss = { navController.popBackStack() },
-                        onNavigateToPaxLuggageVehicle = { updatedRideData ->
-                            // Navigate to pax luggage vehicle screen
-                            android.util.Log.d("MainActivity", "Navigate to pax/luggage/vehicle with: $updatedRideData")
-                            navController.navigate("${Routes.PaxLuggageVehicle}?rideData=${android.util.Base64.encodeToString(Gson().toJson(updatedRideData).toByteArray(), android.util.Base64.NO_WRAP)}")
+                        com.example.limouserapp.ui.booking.TimeSelectionScreen(
+                            rideData = rideData,
+                            onDismiss = { navController.popBackStack() },
+                            onNavigateToPaxLuggageVehicle = { updatedRideData ->
+                                // Navigate to pax luggage vehicle screen
+                                android.util.Log.d(
+                                    "MainActivity",
+                                    "Navigate to pax/luggage/vehicle with: $updatedRideData"
+                                )
+                                navController.navigate(
+                                    "${Routes.PaxLuggageVehicle}?rideData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(updatedRideData).toByteArray(),
+                                            android.util.Base64.NO_WRAP
+                                        )
+                                    }"
+                                )
+                            },
+                            directionsService = directionsService
+                        )
+                    } else {
+                        // Handle null rideData case - maybe show error or go back
+                        android.util.Log.e(
+                            "MainActivity",
+                            "RideData is null, cannot show TimeSelectionScreen"
+                        )
+                        // For now, just pop back to ScheduleRide
+                        navController.popBackStack()
+                    }
+                }
+                composable(
+                    route = "${Routes.PaxLuggageVehicle}?rideData={rideData}",
+                    arguments = listOf(navArgument("rideData") { type = NavType.StringType })
+                ) { backStackEntry ->
+                    val rideDataJson = backStackEntry.arguments?.getString("rideData")
+                    val rideData = if (rideDataJson != null) {
+                        try {
+                            Gson().fromJson(
+                                String(
+                                    android.util.Base64.decode(
+                                        rideDataJson,
+                                        android.util.Base64.NO_WRAP
+                                    )
+                                ), RideData::class.java
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.e(
+                                "MainActivity",
+                                "Failed to parse rideData for PaxLuggageVehicle: $e"
+                            )
+                            null
+                        }
+                    } else null
+
+                    if (rideData != null) {
+                        com.example.limouserapp.ui.booking.PaxLuggageVehicleScreen(
+                            rideData = rideData,
+                            onDismiss = { navController.popBackStack() },
+                            onNext = { updatedRideData ->
+                                // Navigate to MasterVehicleSelectionScreen
+                                navController.navigate(
+                                    "${Routes.MasterVehicleSelection}?rideData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(updatedRideData).toByteArray(),
+                                            android.util.Base64.NO_WRAP
+                                        )
+                                    }"
+                                )
+                            }
+                        )
+                    } else {
+                        android.util.Log.e(
+                            "MainActivity",
+                            "RideData is null, cannot show PaxLuggageVehicleScreen"
+                        )
+                        navController.popBackStack()
+                    }
+                }
+                composable(
+                    route = "${Routes.MasterVehicleSelection}?rideData={rideData}",
+                    arguments = listOf(navArgument("rideData") { type = NavType.StringType })
+                ) { backStackEntry ->
+                    val rideDataJson = backStackEntry.arguments?.getString("rideData")
+                    val rideData = if (rideDataJson != null) {
+                        try {
+                            Gson().fromJson(
+                                String(
+                                    android.util.Base64.decode(
+                                        rideDataJson,
+                                        android.util.Base64.NO_WRAP
+                                    )
+                                ), RideData::class.java
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.e(
+                                "MainActivity",
+                                "Failed to parse rideData for MasterVehicleSelection: $e"
+                            )
+                            null
+                        }
+                    } else null
+
+                    if (rideData != null) {
+                        com.example.limouserapp.ui.booking.MasterVehicleSelectionScreen(
+                            rideData = rideData,
+                            onDismiss = { navController.popBackStack() },
+                            onMasterVehicleSelected = { selectedVehicle ->
+                                // Navigate to VehicleListingScreen
+                                navController.navigate(
+                                    "${Routes.VehicleListing}?masterVehicleId=${selectedVehicle.id}&rideData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(rideData).toByteArray(),
+                                            android.util.Base64.NO_WRAP
+                                        )
+                                    }"
+                                ) {
+                                    popUpTo(Routes.MasterVehicleSelection) { inclusive = false }
+                                }
+                            }
+                        )
+                    } else {
+                        android.util.Log.e(
+                            "MainActivity",
+                            "RideData is null, cannot show MasterVehicleSelectionScreen"
+                        )
+                        navController.popBackStack()
+                    }
+                }
+                composable(
+                    route = "${Routes.VehicleListing}?masterVehicleId={masterVehicleId}&rideData={rideData}",
+                    arguments = listOf(
+                        navArgument("masterVehicleId") { type = NavType.IntType },
+                        navArgument("rideData") { type = NavType.StringType }
+                    )
+                ) { backStackEntry ->
+                    val masterVehicleId = backStackEntry.arguments?.getInt("masterVehicleId") ?: 0
+                    val rideDataJson = backStackEntry.arguments?.getString("rideData")
+                    val rideData = if (rideDataJson != null) {
+                        try {
+                            Gson().fromJson(
+                                String(
+                                    android.util.Base64.decode(
+                                        rideDataJson,
+                                        android.util.Base64.NO_WRAP
+                                    )
+                                ), RideData::class.java
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.e(
+                                "MainActivity",
+                                "Failed to parse rideData for VehicleListing: $e"
+                            )
+                            null
+                        }
+                    } else null
+
+                    if (rideData != null && masterVehicleId > 0) {
+                        com.example.limouserapp.ui.booking.VehicleListingScreen(
+                            rideData = rideData,
+                            selectedMasterVehicleId = masterVehicleId,
+                            onDismiss = { navController.popBackStack() },
+                            onVehicleSelected = { vehicle ->
+                                // Navigate to VehicleDetailsScreen
+                                navController.navigate(
+                                    "${Routes.VehicleDetails}?rideData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(rideData).toByteArray(),
+                                            android.util.Base64.NO_WRAP
+                                        )
+                                    }&vehicleData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(
+                                                vehicle
+                                            ).toByteArray(), android.util.Base64.NO_WRAP
+                                        )
+                                    }"
+                                ) {
+                                    popUpTo(Routes.VehicleListing) { inclusive = false }
+                                }
+                            },
+                            onVehicleDetails = { vehicle ->
+                                // Navigate to VehicleDetailsScreen
+                                navController.navigate(
+                                    "${Routes.VehicleDetails}?rideData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(rideData).toByteArray(),
+                                            android.util.Base64.NO_WRAP
+                                        )
+                                    }&vehicleData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(
+                                                vehicle
+                                            ).toByteArray(), android.util.Base64.NO_WRAP
+                                        )
+                                    }"
+                                ) {
+                                    popUpTo(Routes.VehicleListing) { inclusive = false }
+                                }
+                            },
+                            onBookNow = { vehicle ->
+                                // Navigate to ComprehensiveBookingScreen
+                                navController.navigate(
+                                    "${Routes.ComprehensiveBooking}?rideData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(rideData).toByteArray(),
+                                            android.util.Base64.NO_WRAP
+                                        )
+                                    }&vehicleData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(
+                                                vehicle
+                                            ).toByteArray(), android.util.Base64.NO_WRAP
+                                        )
+                                    }"
+                                ) {
+                                    popUpTo(Routes.VehicleListing) { inclusive = false }
+                                }
+                            }
+                        )
+                    } else {
+                        android.util.Log.e(
+                            "MainActivity",
+                            "Invalid parameters for VehicleListing: masterVehicleId=$masterVehicleId, rideData=$rideData"
+                        )
+                        navController.popBackStack()
+                    }
+                }
+                composable(
+                    route = "${Routes.VehicleDetails}?rideData={rideData}&vehicleData={vehicleData}",
+                    arguments = listOf(
+                        navArgument("rideData") { type = NavType.StringType },
+                        navArgument("vehicleData") { type = NavType.StringType }
+                    )
+                ) { backStackEntry ->
+                    val rideDataJson = backStackEntry.arguments?.getString("rideData")
+                    val vehicleDataJson = backStackEntry.arguments?.getString("vehicleData")
+
+                    val rideData = if (rideDataJson != null) {
+                        try {
+                            Gson().fromJson(
+                                String(
+                                    android.util.Base64.decode(
+                                        rideDataJson,
+                                        android.util.Base64.NO_WRAP
+                                    )
+                                ), RideData::class.java
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.e(
+                                "MainActivity",
+                                "Failed to parse rideData for VehicleDetails: $e"
+                            )
+                            null
+                        }
+                    } else null
+
+                    val vehicle = if (vehicleDataJson != null) {
+                        try {
+                            Gson().fromJson(
+                                String(
+                                    android.util.Base64.decode(
+                                        vehicleDataJson,
+                                        android.util.Base64.NO_WRAP
+                                    )
+                                ), com.example.limouserapp.data.model.booking.Vehicle::class.java
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.e(
+                                "MainActivity",
+                                "Failed to parse vehicleData for VehicleDetails: $e"
+                            )
+                            null
+                        }
+                    } else null
+
+                    if (rideData != null && vehicle != null) {
+                        com.example.limouserapp.ui.booking.VehicleDetailsScreen(
+                            rideData = rideData,
+                            vehicle = vehicle,
+                            onDismiss = { navController.popBackStack() },
+                            onBookNow = {
+                                // Navigate to ComprehensiveBookingScreen
+                                navController.navigate(
+                                    "${Routes.ComprehensiveBooking}?rideData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(rideData).toByteArray(),
+                                            android.util.Base64.NO_WRAP
+                                        )
+                                    }&vehicleData=${
+                                        android.util.Base64.encodeToString(
+                                            Gson().toJson(
+                                                vehicle
+                                            ).toByteArray(), android.util.Base64.NO_WRAP
+                                        )
+                                    }"
+                                ) {
+                                    popUpTo(Routes.VehicleDetails) { inclusive = false }
+                                }
+                            }
+                        )
+                    } else {
+                        android.util.Log.e(
+                            "MainActivity",
+                            "Invalid parameters for VehicleDetails: rideData=$rideData, vehicle=$vehicle"
+                        )
+                        navController.popBackStack()
+                    }
+                }
+                composable(
+                    route = "${Routes.ComprehensiveBooking}?rideData={rideData}&vehicleData={vehicleData}&editBookingId={editBookingId}&repeatBookingId={repeatBookingId}&isReturnFlow={isReturnFlow}",
+                    arguments = listOf(
+                        navArgument("rideData") { type = NavType.StringType },
+                        navArgument("vehicleData") { type = NavType.StringType },
+                        navArgument("editBookingId") { type = NavType.IntType; defaultValue = -1 },
+                        navArgument("repeatBookingId") {
+                            type = NavType.IntType; defaultValue = -1
                         },
-                        directionsService = directionsService
-                    )
-                } else {
-                    // Handle null rideData case - maybe show error or go back
-                    android.util.Log.e("MainActivity", "RideData is null, cannot show TimeSelectionScreen")
-                    // For now, just pop back to ScheduleRide
-                    navController.popBackStack()
-                }
-            }
-            composable(
-                route = "${Routes.PaxLuggageVehicle}?rideData={rideData}",
-                arguments = listOf(navArgument("rideData") { type = NavType.StringType })
-            ) { backStackEntry ->
-                val rideDataJson = backStackEntry.arguments?.getString("rideData")
-                val rideData = if (rideDataJson != null) {
-                    try {
-                        Gson().fromJson(String(android.util.Base64.decode(rideDataJson, android.util.Base64.NO_WRAP)), RideData::class.java)
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Failed to parse rideData for PaxLuggageVehicle: $e")
-                        null
-                    }
-                } else null
-
-                if (rideData != null) {
-                    com.example.limouserapp.ui.booking.PaxLuggageVehicleScreen(
-                        rideData = rideData,
-                        onDismiss = { navController.popBackStack() },
-                        onNext = { updatedRideData ->
-                            // Navigate to MasterVehicleSelectionScreen
-                            navController.navigate("${Routes.MasterVehicleSelection}?rideData=${android.util.Base64.encodeToString(Gson().toJson(updatedRideData).toByteArray(), android.util.Base64.NO_WRAP)}")
+                        navArgument("isReturnFlow") {
+                            type = NavType.BoolType; defaultValue = false
                         }
                     )
-                } else {
-                    android.util.Log.e("MainActivity", "RideData is null, cannot show PaxLuggageVehicleScreen")
-                    navController.popBackStack()
-                }
-            }
-            composable(
-                route = "${Routes.MasterVehicleSelection}?rideData={rideData}",
-                arguments = listOf(navArgument("rideData") { type = NavType.StringType })
-            ) { backStackEntry ->
-                val rideDataJson = backStackEntry.arguments?.getString("rideData")
-                val rideData = if (rideDataJson != null) {
-                    try {
-                        Gson().fromJson(String(android.util.Base64.decode(rideDataJson, android.util.Base64.NO_WRAP)), RideData::class.java)
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Failed to parse rideData for MasterVehicleSelection: $e")
-                        null
-                    }
-                } else null
+                ) { backStackEntry ->
+                    val rideDataJson = backStackEntry.arguments?.getString("rideData")
+                    val vehicleDataJson = backStackEntry.arguments?.getString("vehicleData")
+                    val editBookingId = backStackEntry.arguments?.getInt("editBookingId") ?: -1
+                    val repeatBookingId = backStackEntry.arguments?.getInt("repeatBookingId") ?: -1
+                    val isReturnFlow = backStackEntry.arguments?.getBoolean("isReturnFlow") ?: false
 
-                if (rideData != null) {
-                    com.example.limouserapp.ui.booking.MasterVehicleSelectionScreen(
-                        rideData = rideData,
-                        onDismiss = { navController.popBackStack() },
-                        onMasterVehicleSelected = { selectedVehicle ->
-                            // Navigate to VehicleListingScreen
-                            navController.navigate("${Routes.VehicleListing}?masterVehicleId=${selectedVehicle.id}&rideData=${android.util.Base64.encodeToString(Gson().toJson(rideData).toByteArray(), android.util.Base64.NO_WRAP)}") {
-                                popUpTo(Routes.MasterVehicleSelection) { inclusive = false }
-                            }
+                    val rideData = if (rideDataJson != null) {
+                        try {
+                            Gson().fromJson(
+                                String(
+                                    android.util.Base64.decode(
+                                        rideDataJson,
+                                        android.util.Base64.NO_WRAP
+                                    )
+                                ), RideData::class.java
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.e(
+                                "MainActivity",
+                                "Failed to parse rideData for ComprehensiveBooking: $e"
+                            )
+                            null
                         }
-                    )
-                } else {
-                    android.util.Log.e("MainActivity", "RideData is null, cannot show MasterVehicleSelectionScreen")
-                    navController.popBackStack()
-                }
-            }
-            composable(
-                route = "${Routes.VehicleListing}?masterVehicleId={masterVehicleId}&rideData={rideData}",
-                arguments = listOf(
-                    navArgument("masterVehicleId") { type = NavType.IntType },
-                    navArgument("rideData") { type = NavType.StringType }
-                )
-            ) { backStackEntry ->
-                val masterVehicleId = backStackEntry.arguments?.getInt("masterVehicleId") ?: 0
-                val rideDataJson = backStackEntry.arguments?.getString("rideData")
-                val rideData = if (rideDataJson != null) {
-                    try {
-                        Gson().fromJson(String(android.util.Base64.decode(rideDataJson, android.util.Base64.NO_WRAP)), RideData::class.java)
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Failed to parse rideData for VehicleListing: $e")
-                        null
-                    }
-                } else null
+                    } else null
 
-                if (rideData != null && masterVehicleId > 0) {
-                    com.example.limouserapp.ui.booking.VehicleListingScreen(
-                        rideData = rideData,
-                        selectedMasterVehicleId = masterVehicleId,
-                        onDismiss = { navController.popBackStack() },
-                        onVehicleSelected = { vehicle ->
-                            // Navigate to VehicleDetailsScreen
-                            navController.navigate("${Routes.VehicleDetails}?rideData=${android.util.Base64.encodeToString(Gson().toJson(rideData).toByteArray(), android.util.Base64.NO_WRAP)}&vehicleData=${android.util.Base64.encodeToString(Gson().toJson(vehicle).toByteArray(), android.util.Base64.NO_WRAP)}") {
-                                popUpTo(Routes.VehicleListing) { inclusive = false }
-                            }
-                        },
-                        onVehicleDetails = { vehicle ->
-                            // Navigate to VehicleDetailsScreen
-                            navController.navigate("${Routes.VehicleDetails}?rideData=${android.util.Base64.encodeToString(Gson().toJson(rideData).toByteArray(), android.util.Base64.NO_WRAP)}&vehicleData=${android.util.Base64.encodeToString(Gson().toJson(vehicle).toByteArray(), android.util.Base64.NO_WRAP)}") {
-                                popUpTo(Routes.VehicleListing) { inclusive = false }
-                            }
-                        },
-                        onBookNow = { vehicle ->
-                            // Navigate to ComprehensiveBookingScreen
-                            navController.navigate("${Routes.ComprehensiveBooking}?rideData=${android.util.Base64.encodeToString(Gson().toJson(rideData).toByteArray(), android.util.Base64.NO_WRAP)}&vehicleData=${android.util.Base64.encodeToString(Gson().toJson(vehicle).toByteArray(), android.util.Base64.NO_WRAP)}") {
-                                popUpTo(Routes.VehicleListing) { inclusive = false }
-                            }
+                    val vehicle = if (vehicleDataJson != null) {
+                        try {
+                            Gson().fromJson(
+                                String(
+                                    android.util.Base64.decode(
+                                        vehicleDataJson,
+                                        android.util.Base64.NO_WRAP
+                                    )
+                                ), com.example.limouserapp.data.model.booking.Vehicle::class.java
+                            )
+                        } catch (e: Exception) {
+                            android.util.Log.e(
+                                "MainActivity",
+                                "Failed to parse vehicleData for ComprehensiveBooking: $e"
+                            )
+                            null
                         }
-                    )
-                } else {
-                    android.util.Log.e("MainActivity", "Invalid parameters for VehicleListing: masterVehicleId=$masterVehicleId, rideData=$rideData")
-                    navController.popBackStack()
+                    } else null
+
+                    if (rideData != null && vehicle != null) {
+                        com.example.limouserapp.ui.booking.ComprehensiveBookingScreen(
+                            rideData = rideData,
+                            vehicle = vehicle,
+                            onDismiss = { navController.popBackStack() },
+                            onSuccess = { reservationData ->
+                                // Navigate back to dashboard or show success
+                                navController.navigate(Routes.Dashboard) {
+                                    popUpTo(Routes.Dashboard) { inclusive = false }
+                                }
+                            },
+                            isEditMode = editBookingId > 0,
+                            editBookingId = if (editBookingId > 0) editBookingId else null,
+                            isRepeatMode = repeatBookingId > 0,
+                            repeatBookingId = if (repeatBookingId > 0) repeatBookingId else null,
+                            isReturnFlow = isReturnFlow
+                        )
+                    } else {
+                        android.util.Log.e(
+                            "MainActivity",
+                            "Invalid parameters for ComprehensiveBooking: rideData=$rideData, vehicle=$vehicle"
+                        )
+                        navController.popBackStack()
+                    }
                 }
-            }
-            composable(
-                route = "${Routes.VehicleDetails}?rideData={rideData}&vehicleData={vehicleData}",
-                arguments = listOf(
-                    navArgument("rideData") { type = NavType.StringType },
-                    navArgument("vehicleData") { type = NavType.StringType }
-                )
-            ) { backStackEntry ->
-                val rideDataJson = backStackEntry.arguments?.getString("rideData")
-                val vehicleDataJson = backStackEntry.arguments?.getString("vehicleData")
-
-                val rideData = if (rideDataJson != null) {
-                    try {
-                        Gson().fromJson(String(android.util.Base64.decode(rideDataJson, android.util.Base64.NO_WRAP)), RideData::class.java)
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Failed to parse rideData for VehicleDetails: $e")
-                        null
-                    }
-                } else null
-
-                val vehicle = if (vehicleDataJson != null) {
-                    try {
-                        Gson().fromJson(String(android.util.Base64.decode(vehicleDataJson, android.util.Base64.NO_WRAP)), com.example.limouserapp.data.model.booking.Vehicle::class.java)
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Failed to parse vehicleData for VehicleDetails: $e")
-                        null
-                    }
-                } else null
-
-                if (rideData != null && vehicle != null) {
-                    com.example.limouserapp.ui.booking.VehicleDetailsScreen(
-                        rideData = rideData,
-                        vehicle = vehicle,
-                        onDismiss = { navController.popBackStack() },
-                        onBookNow = {
-                            // Navigate to ComprehensiveBookingScreen
-                            navController.navigate("${Routes.ComprehensiveBooking}?rideData=${android.util.Base64.encodeToString(Gson().toJson(rideData).toByteArray(), android.util.Base64.NO_WRAP)}&vehicleData=${android.util.Base64.encodeToString(Gson().toJson(vehicle).toByteArray(), android.util.Base64.NO_WRAP)}") {
-                                popUpTo(Routes.VehicleDetails) { inclusive = false }
-                            }
-                        }
+                composable(Routes.AccountSettings) {
+                    AccountSettingsScreen(
+                        onBackClick = { navController.popBackStack() }
                     )
-                } else {
-                    android.util.Log.e("MainActivity", "Invalid parameters for VehicleDetails: rideData=$rideData, vehicle=$vehicle")
-                    navController.popBackStack()
                 }
-            }
-            composable(
-                route = "${Routes.ComprehensiveBooking}?rideData={rideData}&vehicleData={vehicleData}&editBookingId={editBookingId}&repeatBookingId={repeatBookingId}&isReturnFlow={isReturnFlow}",
-                arguments = listOf(
-                    navArgument("rideData") { type = NavType.StringType },
-                    navArgument("vehicleData") { type = NavType.StringType },
-                    navArgument("editBookingId") { type = NavType.IntType; defaultValue = -1 },
-                    navArgument("repeatBookingId") { type = NavType.IntType; defaultValue = -1 },
-                    navArgument("isReturnFlow") { type = NavType.BoolType; defaultValue = false }
-                )
-            ) { backStackEntry ->
-                val rideDataJson = backStackEntry.arguments?.getString("rideData")
-                val vehicleDataJson = backStackEntry.arguments?.getString("vehicleData")
-                val editBookingId = backStackEntry.arguments?.getInt("editBookingId") ?: -1
-                val repeatBookingId = backStackEntry.arguments?.getInt("repeatBookingId") ?: -1
-                val isReturnFlow = backStackEntry.arguments?.getBoolean("isReturnFlow") ?: false
-
-                val rideData = if (rideDataJson != null) {
-                    try {
-                        Gson().fromJson(String(android.util.Base64.decode(rideDataJson, android.util.Base64.NO_WRAP)), RideData::class.java)
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Failed to parse rideData for ComprehensiveBooking: $e")
-                        null
-                    }
-                } else null
-
-                val vehicle = if (vehicleDataJson != null) {
-                    try {
-                        Gson().fromJson(String(android.util.Base64.decode(vehicleDataJson, android.util.Base64.NO_WRAP)), com.example.limouserapp.data.model.booking.Vehicle::class.java)
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Failed to parse vehicleData for ComprehensiveBooking: $e")
-                        null
-                    }
-                } else null
-
-                if (rideData != null && vehicle != null) {
-                    com.example.limouserapp.ui.booking.ComprehensiveBookingScreen(
-                        rideData = rideData,
-                        vehicle = vehicle,
-                        onDismiss = { navController.popBackStack() },
-                        onSuccess = { reservationData ->
-                            // Navigate back to dashboard or show success
-                            navController.navigate(Routes.Dashboard) {
+                composable(Routes.MyBookings) {
+                    MyBookingsScreen(
+                        onBackClick = {
+                            // Navigate back to Dashboard and open drawer
+                            navController.navigate("${Routes.Dashboard}?editBookingId=-1&repeatBookingId=-1&isReturnFlow=false&openDrawer=true") {
                                 popUpTo(Routes.Dashboard) { inclusive = false }
                             }
                         },
-                        isEditMode = editBookingId > 0,
-                        editBookingId = if (editBookingId > 0) editBookingId else null,
-                        isRepeatMode = repeatBookingId > 0,
-                        repeatBookingId = if (repeatBookingId > 0) repeatBookingId else null,
-                        isReturnFlow = isReturnFlow
+                        onEditBooking = { bookingId ->
+                            // Navigate to dashboard with booking ID to trigger edit mode
+                            android.util.Log.d(
+                                "MainActivity",
+                                "🔄 Navigating to dashboard with edit booking ID: $bookingId"
+                            )
+                            navController.navigate("${Routes.Dashboard}?editBookingId=$bookingId")
+                        },
+                        onRepeatBooking = { bookingId ->
+                            // Navigate to dashboard with booking ID to trigger repeat mode
+                            android.util.Log.d(
+                                "MainActivity",
+                                "🔄 Navigating to dashboard with repeat booking ID: $bookingId"
+                            )
+                            navController.navigate("${Routes.Dashboard}?repeatBookingId=$bookingId&isReturnFlow=false")
+                        },
+                        onReturnBooking = { bookingId ->
+                            // Navigate to dashboard with booking ID to trigger return flow
+                            android.util.Log.d(
+                                "MainActivity",
+                                "🔄 Navigating to dashboard with return booking ID: $bookingId"
+                            )
+                            navController.navigate("${Routes.Dashboard}?repeatBookingId=$bookingId&isReturnFlow=true")
+                        },
+                        onViewInvoice = { id ->
+                            navController.navigate("${Routes.InvoiceWebView}/$id")
+                        }
                     )
-                } else {
-                    android.util.Log.e("MainActivity", "Invalid parameters for ComprehensiveBooking: rideData=$rideData, vehicle=$vehicle")
-                    navController.popBackStack()
                 }
-            }
-            composable(Routes.AccountSettings) {
-                AccountSettingsScreen(
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-            composable(Routes.MyBookings) {
-                MyBookingsScreen(
-                    onBackClick = { 
-                        // Navigate back to Dashboard and open drawer
-                        navController.navigate("${Routes.Dashboard}?editBookingId=-1&repeatBookingId=-1&isReturnFlow=false&openDrawer=true") {
-                            popUpTo(Routes.Dashboard) { inclusive = false }
+                composable(Routes.Invoices) {
+                    MyInvoicesScreen(
+                        onBackClick = { navController.popBackStack() },
+                        onViewInvoiceSummary = { invoiceNumber ->
+                            navController.navigate("${Routes.InvoiceWebView}/$invoiceNumber")
                         }
-                    },
-                    onEditBooking = { bookingId ->
-                        // Navigate to dashboard with booking ID to trigger edit mode
-                        android.util.Log.d("MainActivity", "🔄 Navigating to dashboard with edit booking ID: $bookingId")
-                        navController.navigate("${Routes.Dashboard}?editBookingId=$bookingId")
-                    },
-                    onRepeatBooking = { bookingId ->
-                        // Navigate to dashboard with booking ID to trigger repeat mode
-                        android.util.Log.d("MainActivity", "🔄 Navigating to dashboard with repeat booking ID: $bookingId")
-                        navController.navigate("${Routes.Dashboard}?repeatBookingId=$bookingId&isReturnFlow=false")
-                    },
-                    onReturnBooking = { bookingId ->
-                        // Navigate to dashboard with booking ID to trigger return flow
-                        android.util.Log.d("MainActivity", "🔄 Navigating to dashboard with return booking ID: $bookingId")
-                        navController.navigate("${Routes.Dashboard}?repeatBookingId=$bookingId&isReturnFlow=true")
-                    }
-                )
-            }
-            composable(Routes.Invoices) {
-                MyInvoicesScreen(
-                    onBackClick = { navController.popBackStack() },
-                    onViewInvoiceSummary = { invoiceNumber ->
-                        navController.navigate("${Routes.InvoiceWebView}/$invoiceNumber")
-                    }
-                )
-            }
-            composable(
-                route = "${Routes.InvoiceWebView}/{invoiceNumber}",
-                arguments = listOf(
-                    navArgument("invoiceNumber") {
-                        type = NavType.IntType
-                    }
-                )
-            ) { backStackEntry ->
-                val invoiceNumber = backStackEntry.arguments?.getInt("invoiceNumber") ?: 0
-                InvoiceWebViewScreen(
-                    invoiceNumber = invoiceNumber,
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-            composable(Routes.MyCards) {
-                MyCardsScreen(
-                    onBackClick = { 
-                        // Navigate back to Dashboard and open drawer
-                        navController.navigate("${Routes.Dashboard}?editBookingId=-1&repeatBookingId=-1&isReturnFlow=false&openDrawer=true") {
-                            popUpTo(Routes.Dashboard) { inclusive = false }
+                    )
+                }
+                composable(
+                    route = "${Routes.InvoiceWebView}/{invoiceNumber}",
+                    arguments = listOf(
+                        navArgument("invoiceNumber") {
+                            type = NavType.IntType
                         }
-                    }
-                )
-            }
-            composable(Routes.Notifications) {
-                NotificationScreen(
-                    onBackClick = { navController.popBackStack() }
-                )
-            }
-            composable(
-                route = Routes.LiveRide,
-                arguments = listOf(
-                    navArgument("bookingId") { type = NavType.StringType }
-                )
-            ) { backStackEntry ->
-                val bookingId = backStackEntry.arguments?.getString("bookingId")
-                LiveRideInProgressScreen(
-                    bookingId = bookingId,
-                    onBackClick = { navController.popBackStack() },
-                    onNavigateToChat = { chatBookingId ->
-                        navController.navigate("${Routes.Chat}/$chatBookingId")
-                    }
-                )
-            }
-            composable(
-                route = "${Routes.Chat}/{bookingId}",
-                arguments = listOf(
-                    navArgument("bookingId") { type = NavType.IntType }
-                )
-            ) { backStackEntry ->
-                val bookingId = backStackEntry.arguments?.getInt("bookingId") ?: 0
-                val service = socketService
-                if (service == null || bookingId <= 0) {
-                    // Simple fallback UI if launched too early.
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Chat unavailable")
-                    }
-                } else {
-                    ChatScreen(
+                    )
+                ) { backStackEntry ->
+                    val invoiceNumber = backStackEntry.arguments?.getInt("invoiceNumber") ?: 0
+                    InvoiceWebViewScreen(
+                        invoiceNumber = invoiceNumber,
+                        onBackClick = { navController.popBackStack() }
+                    )
+                }
+                composable(Routes.MyCards) {
+                    MyCardsScreen(
+                        onBackClick = {
+                            // Navigate back to Dashboard and open drawer
+                            navController.navigate("${Routes.Dashboard}?editBookingId=-1&repeatBookingId=-1&isReturnFlow=false&openDrawer=true") {
+                                popUpTo(Routes.Dashboard) { inclusive = false }
+                            }
+                        }
+                    )
+                }
+                composable(Routes.Notifications) {
+                    NotificationScreen(
+                        onBackClick = { navController.popBackStack() }
+                    )
+                }
+                composable(
+                    route = Routes.LiveRide,
+                    arguments = listOf(
+                        navArgument("bookingId") { type = NavType.StringType }
+                    )
+                ) { backStackEntry ->
+                    val bookingId = backStackEntry.arguments?.getString("bookingId")
+                    LiveRideInProgressScreen(
                         bookingId = bookingId,
-                        socketService = service,
-                        onBack = { navController.popBackStack() }
+                        onBackClick = { navController.popBackStack() },
+                        onNavigateToChat = { chatBookingId ->
+                            navController.navigate("${Routes.Chat}/$chatBookingId")
+                        }
+                    )
+                }
+                composable(
+                    route = "${Routes.Chat}/{bookingId}",
+                    arguments = listOf(
+                        navArgument("bookingId") { type = NavType.IntType }
+                    )
+                ) { backStackEntry ->
+                    val bookingId = backStackEntry.arguments?.getInt("bookingId") ?: 0
+                    val service = socketService
+                    if (service == null || bookingId <= 0) {
+                        // Simple fallback UI if launched too early.
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Chat unavailable")
+                        }
+                    } else {
+                        ChatScreen(
+                            bookingId = bookingId,
+                            socketService = service,
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                }
+                composable(Routes.Success) {
+                    SuccessScreen(navController = navController)
+                }
+                composable(
+                    route = "mapLocationPicker?initialLat={initialLat}&initialLong={initialLong}&initialAddress={initialAddress}",
+                    arguments = listOf(
+                        navArgument("initialLat") {
+                            type = NavType.StringType; nullable = true; defaultValue = null
+                        },
+                        navArgument("initialLong") {
+                            type = NavType.StringType; nullable = true; defaultValue = null
+                        },
+                        navArgument("initialAddress") {
+                            type = NavType.StringType; nullable = true; defaultValue = null
+                        }
+                    )
+                ) { backStackEntry ->
+                    val initialLat =
+                        backStackEntry.arguments?.getString("initialLat")?.toDoubleOrNull()
+                    val initialLong =
+                        backStackEntry.arguments?.getString("initialLong")?.toDoubleOrNull()
+                    val initialAddress = backStackEntry.arguments?.getString("initialAddress")
+                    com.example.limouserapp.ui.booking.MapLocationPickerScreen(
+                        navController = navController,
+                        initialLat = initialLat,
+                        initialLong = initialLong,
+                        initialAddress = initialAddress
                     )
                 }
             }
-            composable(Routes.Success) {
-                SuccessScreen(navController = navController)
-            }
-            composable(
-                route = "mapLocationPicker?initialLat={initialLat}&initialLong={initialLong}&initialAddress={initialAddress}",
-                arguments = listOf(
-                    navArgument("initialLat") { type = NavType.StringType; nullable = true; defaultValue = null },
-                    navArgument("initialLong") { type = NavType.StringType; nullable = true; defaultValue = null },
-                    navArgument("initialAddress") { type = NavType.StringType; nullable = true; defaultValue = null }
-                )
-            ) { backStackEntry ->
-                val initialLat = backStackEntry.arguments?.getString("initialLat")?.toDoubleOrNull()
-                val initialLong = backStackEntry.arguments?.getString("initialLong")?.toDoubleOrNull()
-                val initialAddress = backStackEntry.arguments?.getString("initialAddress")
-                com.example.limouserapp.ui.booking.MapLocationPickerScreen(
-                    navController = navController,
-                    initialLat = initialLat,
-                    initialLong = initialLong,
-                    initialAddress = initialAddress
+
+            // Display notifications on top of all content
+            socketService?.let { service ->
+                NotificationContainer(
+                    socketService = service,
+                    modifier = Modifier.align(Alignment.TopStart)
                 )
             }
+
+            // Global loading overlay - shows for all API calls except on Dashboard, My Bookings, My Cards, Account Settings, Phone, and OTP
+            // These screens have their own shimmer loaders or loading indicators
+            val shouldHideLoader = currentDestination?.let { route ->
+                route.startsWith(Routes.Dashboard) ||
+                        route == Routes.MyBookings ||
+                        route == Routes.MyCards ||
+                        route == Routes.Invoices ||
+                        route == Routes.Notifications ||
+                        route == Routes.AccountSettings ||
+                        route == Routes.Phone ||
+                        route == Routes.Otp ||
+                        route == Routes.VehicleListing ||
+                        route == Routes.MasterVehicleSelection
+            } ?: false
+            LoadingOverlay(isLoading = isLoading && !shouldHideLoader)
         }
-        
-        // Display notifications on top of all content
-        socketService?.let { service ->
-            NotificationContainer(
-                socketService = service,
-                modifier = Modifier.align(Alignment.TopStart)
-            )
-        }
-        
-        // Global loading overlay - shows for all API calls except on Dashboard, My Bookings, My Cards, Account Settings, Phone, and OTP
-        // These screens have their own shimmer loaders or loading indicators
-        val shouldHideLoader = currentDestination?.let { route ->
-            route.startsWith(Routes.Dashboard) ||
-            route == Routes.MyBookings ||
-            route == Routes.MyCards ||
-            route == Routes.Invoices ||
-            route == Routes.Notifications ||
-            route == Routes.AccountSettings ||
-            route == Routes.Phone ||
-            route == Routes.Otp ||
-            route == Routes.VehicleListing ||
-            route == Routes.MasterVehicleSelection
-        } ?: false
-        LoadingOverlay(isLoading = isLoading && !shouldHideLoader)
     }
 }
 
-@Composable
-private fun SplashScreen(onFinished: () -> Unit) {
-    var scale by remember { mutableStateOf(0.95f) }
-    var alpha by remember { mutableStateOf(0f) }
-    
-    LaunchedEffect(Unit) {
-        // Fade in
-        alpha = 1f
-        kotlinx.coroutines.delay(200)
-        
-        // Zoom in
-        scale = 1.0f
-        kotlinx.coroutines.delay(600)
-        
-        // Hold
-        kotlinx.coroutines.delay(300)
-        
-        // Fade out
-        alpha = 0f
-        kotlinx.coroutines.delay(150)
-        
-        onFinished()
+
+    @Composable
+    private fun OnboardingScreen(onGetStarted: () -> Unit) {
+        // Placeholder; will use provided image and gradient later
+        Box(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+            Column(modifier = Modifier.align(Alignment.BottomStart)) {
+                Text(
+                    "Sit back & go",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "wherever you want",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = LimoOrange
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = onGetStarted,
+                    colors = ButtonDefaults.buttonColors(containerColor = LimoOrange)
+                ) {
+                    Text("Let's get started")
+                }
+            }
+        }
     }
-    
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(LimoBlack),
-        contentAlignment = Alignment.Center
-    ) {
-        Image(
-            painter = painterResource(id = R.drawable.logo),
-            contentDescription = "1-800-LIMO.COM Logo",
-            modifier = Modifier
-                .scale(scale)
-                .alpha(alpha)
-                .fillMaxWidth(0.85f)
-                .wrapContentHeight()
-                .wrapContentWidth(Alignment.CenterHorizontally)
+
+
+    @Composable
+    private fun PhoneEntryScreenWithViewModel(navController: NavHostController) {
+        val viewModel: PhoneEntryViewModel = hiltViewModel()
+        val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+        LaunchedEffect(uiState.success) {
+            if (uiState.success) {
+                // Navigate to OTP screen with temp user ID and phone number
+                val tempUserId = uiState.tempUserId
+                val phoneNumber = uiState.phoneNumberWithCountryCode
+                navController.navigate(Routes.Otp)
+            }
+        }
+
+        PhoneEntryScreen(
+            onNext = { viewModel.onEvent(PhoneEntryUiEvent.SendVerificationCode) },
+            onBack = { navController.popBackStack() },
+            uiState = uiState,
+            onEvent = viewModel::onEvent
         )
     }
-}
 
-@Composable
-private fun OnboardingScreen(onGetStarted: () -> Unit) {
-    // Placeholder; will use provided image and gradient later
-    Box(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-        Column(modifier = Modifier.align(Alignment.BottomStart)) {
-            Text("Sit back & go", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onBackground)
-            Spacer(Modifier.height(8.dp))
-            Text("wherever you want", style = MaterialTheme.typography.headlineLarge, color = LimoOrange)
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = onGetStarted, colors = ButtonDefaults.buttonColors(containerColor = LimoOrange)) {
-                Text("Let's get started")
-            }
-        }
-    }
-}
+    @Composable
+    private fun OtpScreenWithViewModel(navController: NavHostController) {
+        val viewModel: OtpViewModel = hiltViewModel()
+        val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-@Composable
-private fun SplashScreenWithViewModel(navController: NavHostController) {
-    val viewModel: SplashViewModel = hiltViewModel()
-    
-    LaunchedEffect(Unit) {
-        // Wait for splash animation (1.25 seconds) + auth check
-        kotlinx.coroutines.delay(1500) // Total wait time
-        
-        val nextDestination = viewModel.getNextDestination()
-        navController.navigate(nextDestination) {
-            popUpTo(Routes.Splash) { inclusive = true }
-        }
-    }
-    
-    SplashScreen(onFinished = { /* Handled by LaunchedEffect */ })
-}
+        // Initialize OTP screen with proper data
 
-@Composable
-private fun PhoneEntryScreenWithViewModel(navController: NavHostController) {
-    val viewModel: PhoneEntryViewModel = hiltViewModel()
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-
-    LaunchedEffect(uiState.success) {
-        if (uiState.success) {
-            // Navigate to OTP screen with temp user ID and phone number
-            val tempUserId = uiState.tempUserId
-            val phoneNumber = uiState.phoneNumberWithCountryCode
-            navController.navigate(Routes.Otp)
-        }
-    }
-    
-    PhoneEntryScreen(
-        onNext = { viewModel.onEvent(PhoneEntryUiEvent.SendVerificationCode) },
-        onBack = { navController.popBackStack() },
-        uiState = uiState,
-        onEvent = viewModel::onEvent
-    )
-}
-
-@Composable
-private fun OtpScreenWithViewModel(navController: NavHostController) {
-    val viewModel: OtpViewModel = hiltViewModel()
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    
-    // Initialize OTP screen with proper data
-    
-    LaunchedEffect(uiState.success, uiState.nextAction) {
-        if (uiState.success && uiState.nextAction != null) {
-            val destination = when (uiState.nextAction) {
-                "dashboard" -> Routes.Dashboard
-                "basic_details" -> Routes.BasicDetails
-                "credit_card" -> Routes.CreditCard
-                "success" -> Routes.Success
-                else -> Routes.BasicDetails // fallback
-            }
-            navController.navigate(destination)
-        }
-    }
-    
-    OtpScreen(
-        tempUserId = uiState.tempUserId,
-        phoneNumber = uiState.phoneNumber,
-        onNext = { destination ->
-            val route = when (destination) {
-                "dashboard" -> Routes.Dashboard
-                "basic_details" -> Routes.BasicDetails
-                "credit_card" -> Routes.CreditCard
-                "success" -> Routes.Success
-                else -> Routes.BasicDetails // fallback
-            }
-            navController.navigate(route)
-        },
-        onBack = { navController.navigate(Routes.Phone) }
-    )
-}
-
-@Composable
-private fun BasicDetailsScreenWithViewModel(navController: NavHostController) {
-    val viewModel: BasicDetailsViewModel = hiltViewModel()
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val userStateManager = remember {
-        EntryPointAccessors.fromApplication(
-            context.applicationContext,
-            UserStateManagerEntryPoint::class.java
-        ).userStateManager()
-    }
-
-    // Log state when screen is displayed
-    LaunchedEffect(Unit) {
-        Timber.d("MainActivity: BasicDetailsScreen displayed - name='${uiState.name}', email='${uiState.email}', success=${uiState.success}")
-    }
-
-    // Log state changes
-    LaunchedEffect(uiState.name, uiState.email) {
-        Timber.d("MainActivity: BasicDetailsScreen state updated - name='${uiState.name}', email='${uiState.email}'")
-    }
-
-    // Track previous success state to only navigate when it transitions from false to true
-    var previousSuccess by remember { mutableStateOf(false) }
-
-    // Check if returning from CreditCard screen and prevent auto-navigation
-    LaunchedEffect(Unit) {
-        if (userStateManager.getJustNavigatedBackFromCreditCard()) {
-            Timber.d("MainActivity: BasicDetailsScreen - Returning from CreditCard, preventing auto-navigation")
-            userStateManager.setJustNavigatedBackFromCreditCard(false)
-            previousSuccess = true
-        }
-    }
-
-    // Navigate when success becomes true and we haven't navigated yet
-    LaunchedEffect(uiState.success) {
-        val currentDestination = navController.currentDestination?.route
-        val isReturningFromCreditCard = userStateManager.getJustNavigatedBackFromCreditCard()
-        Timber.d("MainActivity: BasicDetailsScreen - success=${uiState.success}, previousSuccess=$previousSuccess, currentDestination=$currentDestination, isReturningFromCreditCard=$isReturningFromCreditCard")
-
-        // If returning from CreditCard, reset flag and prevent navigation
-        if (isReturningFromCreditCard) {
-            userStateManager.setJustNavigatedBackFromCreditCard(false)
-            previousSuccess = true
-            return@LaunchedEffect
-        }
-
-        // Only navigate when success transitions from false to true
-        // AND we're currently on the basic_details screen (not already navigated away)
-        if (uiState.success && !previousSuccess && currentDestination == Routes.BasicDetails) {
-            previousSuccess = true
-            Timber.d("MainActivity: BasicDetailsScreen - Success flag changed to true, navigating forward")
-            // Use next_step from stored value to determine navigation
-            val nextStep = userStateManager.getNextStep()
-            Timber.d("MainActivity: BasicDetailsScreen - nextStep from userStateManager: $nextStep")
-            val destination = when (nextStep) {
-                "credit_card" -> Routes.CreditCard
-                "basic_details" -> Routes.BasicDetails
-                "dashboard" -> Routes.Dashboard
-                else -> Routes.CreditCard // Default fallback
-            }
-            Timber.d("MainActivity: BasicDetailsScreen - navigating to destination: $destination")
-            navController.navigate(destination)
-        } else if (!uiState.success) {
-            // Reset the flag when success becomes false
-            previousSuccess = false
-            Timber.d("MainActivity: BasicDetailsScreen - success became false, resetting previousSuccess")
-        } else if (uiState.success && currentDestination != Routes.BasicDetails) {
-            // If success is true but we're not on basic_details, we've already navigated
-            // Update previousSuccess to prevent re-navigation
-            previousSuccess = true
-            Timber.d("MainActivity: BasicDetailsScreen - Already navigated away, not navigating again")
-        } else {
-            Timber.d("MainActivity: BasicDetailsScreen - Navigation conditions not met: success=${uiState.success}, !previousSuccess=${!previousSuccess}, currentDestination==BasicDetails=${currentDestination == Routes.BasicDetails}")
-        }
-    }
-    
-    AddBasicDetailsScreen(
-        onNext = { viewModel.onEvent(BasicDetailsUiEvent.SubmitDetails) },
-        onBack = { navController.popBackStack() },
-        onNavigateToTerms = { navController.navigate(Routes.TermsOfUse) },
-        onNavigateToPrivacy = { navController.navigate(Routes.PrivacyPolicy) },
-        uiState = uiState,
-        onEvent = viewModel::onEvent
-    )
-}
-
-@Composable
-private fun CreditCardScreenWithViewModel(navController: NavHostController) {
-    val viewModel: CreditCardViewModel = hiltViewModel()
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val userStateManager = remember {
-        EntryPointAccessors.fromApplication(
-            context.applicationContext,
-            UserStateManagerEntryPoint::class.java
-        ).userStateManager()
-    }
-    
-    LaunchedEffect(uiState.success) {
-        if (uiState.success) {
-            // Check if profile is completed - if so, go directly to Dashboard
-            val isProfileCompleted = userStateManager.isProfileCompleted()
-            if (isProfileCompleted) {
-                navController.navigate(Routes.Dashboard)
-            } else {
-                // Use next_step from stored value to determine navigation
-                val nextStep = userStateManager.getNextStep()
-                val destination = when (nextStep) {
+        LaunchedEffect(uiState.success, uiState.nextAction) {
+            if (uiState.success && uiState.nextAction != null) {
+                val destination = when (uiState.nextAction) {
                     "dashboard" -> Routes.Dashboard
-                    "profile_complete" -> Routes.Dashboard
+                    "basic_details" -> Routes.BasicDetails
+                    "credit_card" -> Routes.CreditCard
                     "success" -> Routes.Success
-                    else -> Routes.Success // Default fallback
+                    else -> Routes.BasicDetails // fallback
                 }
                 navController.navigate(destination)
             }
         }
+
+        OtpScreen(
+            tempUserId = uiState.tempUserId,
+            phoneNumber = uiState.phoneNumber,
+            onNext = { destination ->
+                val route = when (destination) {
+                    "dashboard" -> Routes.Dashboard
+                    "basic_details" -> Routes.BasicDetails
+                    "credit_card" -> Routes.CreditCard
+                    "success" -> Routes.Success
+                    else -> Routes.BasicDetails // fallback
+                }
+                navController.navigate(route)
+            },
+            onBack = { navController.navigate(Routes.Phone) }
+        )
+    }
+
+    @Composable
+    private fun BasicDetailsScreenWithViewModel(navController: NavHostController) {
+        val viewModel: BasicDetailsViewModel = hiltViewModel()
+        val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+        val context = LocalContext.current
+        val userStateManager = remember {
+            EntryPointAccessors.fromApplication(
+                context.applicationContext,
+                UserStateManagerEntryPoint::class.java
+            ).userStateManager()
+        }
+
+        // Log state when screen is displayed
+        LaunchedEffect(Unit) {
+            Timber.d("MainActivity: BasicDetailsScreen displayed - name='${uiState.name}', email='${uiState.email}', success=${uiState.success}")
+        }
+
+        // Log state changes
+        LaunchedEffect(uiState.name, uiState.email) {
+            Timber.d("MainActivity: BasicDetailsScreen state updated - name='${uiState.name}', email='${uiState.email}'")
+        }
+
+        // Track previous success state to only navigate when it transitions from false to true
+        var previousSuccess by remember { mutableStateOf(false) }
+
+        // Check if returning from CreditCard screen and prevent auto-navigation
+        LaunchedEffect(Unit) {
+            if (userStateManager.getJustNavigatedBackFromCreditCard()) {
+                Timber.d("MainActivity: BasicDetailsScreen - Returning from CreditCard, preventing auto-navigation")
+                userStateManager.setJustNavigatedBackFromCreditCard(false)
+                previousSuccess = true
+            }
+        }
+
+        // Navigate when success becomes true and we haven't navigated yet
+        LaunchedEffect(uiState.success) {
+            val currentDestination = navController.currentDestination?.route
+            val isReturningFromCreditCard = userStateManager.getJustNavigatedBackFromCreditCard()
+            Timber.d("MainActivity: BasicDetailsScreen - success=${uiState.success}, previousSuccess=$previousSuccess, currentDestination=$currentDestination, isReturningFromCreditCard=$isReturningFromCreditCard")
+
+            // If returning from CreditCard, reset flag and prevent navigation
+            if (isReturningFromCreditCard) {
+                userStateManager.setJustNavigatedBackFromCreditCard(false)
+                previousSuccess = true
+                return@LaunchedEffect
+            }
+
+            // Only navigate when success transitions from false to true
+            // AND we're currently on the basic_details screen (not already navigated away)
+            if (uiState.success && !previousSuccess && currentDestination == Routes.BasicDetails) {
+                previousSuccess = true
+                Timber.d("MainActivity: BasicDetailsScreen - Success flag changed to true, navigating forward")
+                // Use next_step from stored value to determine navigation
+                val nextStep = userStateManager.getNextStep()
+                Timber.d("MainActivity: BasicDetailsScreen - nextStep from userStateManager: $nextStep")
+                val destination = when (nextStep) {
+                    "credit_card" -> Routes.CreditCard
+                    "basic_details" -> Routes.BasicDetails
+                    "dashboard" -> Routes.Dashboard
+                    else -> Routes.CreditCard // Default fallback
+                }
+                Timber.d("MainActivity: BasicDetailsScreen - navigating to destination: $destination")
+                navController.navigate(destination)
+            } else if (!uiState.success) {
+                // Reset the flag when success becomes false
+                previousSuccess = false
+                Timber.d("MainActivity: BasicDetailsScreen - success became false, resetting previousSuccess")
+            } else if (uiState.success && currentDestination != Routes.BasicDetails) {
+                // If success is true but we're not on basic_details, we've already navigated
+                // Update previousSuccess to prevent re-navigation
+                previousSuccess = true
+                Timber.d("MainActivity: BasicDetailsScreen - Already navigated away, not navigating again")
+            } else {
+                Timber.d("MainActivity: BasicDetailsScreen - Navigation conditions not met: success=${uiState.success}, !previousSuccess=${!previousSuccess}, currentDestination==BasicDetails=${currentDestination == Routes.BasicDetails}")
+            }
+        }
+
+        AddBasicDetailsScreen(
+            onNext = { viewModel.onEvent(BasicDetailsUiEvent.SubmitDetails) },
+            onBack = { navController.popBackStack() },
+            onNavigateToTerms = { navController.navigate(Routes.TermsOfUse) },
+            onNavigateToPrivacy = { navController.navigate(Routes.PrivacyPolicy) },
+            uiState = uiState,
+            onEvent = viewModel::onEvent
+        )
     }
     
-    AddCreditCardScreen(
-        onNext = { viewModel.onEvent(CreditCardUiEvent.SubmitCard) },
-        onBack = {
-            Timber.d("MainActivity: CreditCardScreen - Back button clicked, attempting to navigate back")
-            Timber.d("MainActivity: Current destination before pop: ${navController.currentDestination?.route}")
 
-            // Set flag to indicate we're navigating back from credit card screen
-            userStateManager.setJustNavigatedBackFromCreditCard(true)
-            Timber.d("MainActivity: Set justNavigatedBackFromCreditCard flag to true")
+    @Composable
+    private fun CreditCardScreenWithViewModel(navController: NavHostController) {
+        val viewModel: CreditCardViewModel = hiltViewModel()
+        val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+        val context = LocalContext.current
+        val userStateManager = remember {
+            EntryPointAccessors.fromApplication(
+                context.applicationContext,
+                UserStateManagerEntryPoint::class.java
+            ).userStateManager()
+        }
 
-            try {
-                val popped = navController.popBackStack()
-                Timber.d("MainActivity: popBackStack() returned: $popped")
-                if (!popped) {
-                    Timber.w("MainActivity: popBackStack() returned false - no destination to pop to")
-                    // Try navigating explicitly to BasicDetails as fallback
-                    Timber.d("MainActivity: Attempting explicit navigate to BasicDetails")
-                    navController.navigate(Routes.BasicDetails) {
-                        popUpTo(Routes.CreditCard) { inclusive = true }
-                    }
+        LaunchedEffect(uiState.success) {
+            if (uiState.success) {
+                // Check if profile is completed - if so, go directly to Dashboard
+                val isProfileCompleted = userStateManager.isProfileCompleted()
+                if (isProfileCompleted) {
+                    navController.navigate(Routes.Dashboard)
                 } else {
-                    Timber.d("MainActivity: Successfully navigated back to: ${navController.currentDestination?.route}")
+                    // Use next_step from stored value to determine navigation
+                    val nextStep = userStateManager.getNextStep()
+                    val destination = when (nextStep) {
+                        "dashboard" -> Routes.Dashboard
+                        "profile_complete" -> Routes.Dashboard
+                        "success" -> Routes.Success
+                        else -> Routes.Success // Default fallback
+                    }
+                    navController.navigate(destination)
                 }
-            } catch (e: Exception) {
-                Timber.e(e, "MainActivity: Error during popBackStack(): ${e.message}")
             }
-        },
-        uiState = uiState,
-        onEvent = viewModel::onEvent
-    )
-}
+        }
+
+        AddCreditCardScreen(
+            onNext = { viewModel.onEvent(CreditCardUiEvent.SubmitCard) },
+            onBack = {
+                Timber.d("MainActivity: CreditCardScreen - Back button clicked, attempting to navigate back")
+                Timber.d("MainActivity: Current destination before pop: ${navController.currentDestination?.route}")
+
+                // Set flag to indicate we're navigating back from credit card screen
+                userStateManager.setJustNavigatedBackFromCreditCard(true)
+                Timber.d("MainActivity: Set justNavigatedBackFromCreditCard flag to true")
+
+                try {
+                    val popped = navController.popBackStack()
+                    Timber.d("MainActivity: popBackStack() returned: $popped")
+                    if (!popped) {
+                        Timber.w("MainActivity: popBackStack() returned false - no destination to pop to")
+                        // Try navigating explicitly to BasicDetails as fallback
+                        Timber.d("MainActivity: Attempting explicit navigate to BasicDetails")
+                        navController.navigate(Routes.BasicDetails) {
+                            popUpTo(Routes.CreditCard) { inclusive = true }
+                        }
+                    } else {
+                        Timber.d("MainActivity: Successfully navigated back to: ${navController.currentDestination?.route}")
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "MainActivity: Error during popBackStack(): ${e.message}")
+                }
+            },
+            uiState = uiState,
+            onEvent = viewModel::onEvent
+        )
+    }
 
 @Composable
 private fun SuccessScreen(navController: NavHostController) {
@@ -1161,7 +1364,7 @@ private fun SuccessScreen(navController: NavHostController) {
 }
 
 // TEMPORARY: Simple wrapper to pass SocketService for test button
-@Composable  
+@Composable
 private fun DashboardScreenWithPermissions(
     navController: NavHostController,
     onNavigateToProfile: () -> Unit,
@@ -1175,6 +1378,9 @@ private fun DashboardScreenWithPermissions(
     onLogout: () -> Unit,
     onNavigateToLiveRide: (bookingId: String?) -> Unit,
     onNavigateToNotifications: () -> Unit,
+    onNavigateToFaq: () -> Unit = {},
+    onNavigateToTutorials: () -> Unit = {},
+    onViewInvoice: (Int) -> Unit = {},
     initialEditBookingId: Int? = null,
     initialRepeatBookingId: Int? = null,
     initialIsReturnFlow: Boolean = false,
@@ -1184,8 +1390,7 @@ private fun DashboardScreenWithPermissions(
 ) {
     val context = LocalContext.current
     val activity = context as MainActivity
-    
-    // TEMPORARY: Create a simple composable that injects SocketService
+
     TestDashboardWrapper(
         navController = navController,
         onNavigateToProfile = onNavigateToProfile,
@@ -1200,6 +1405,9 @@ private fun DashboardScreenWithPermissions(
         activity = activity,
         onNavigateToLiveRide = onNavigateToLiveRide,
         onNavigateToNotifications = onNavigateToNotifications,
+        onNavigateToFaq = onNavigateToFaq,
+        onNavigateToTutorials = onNavigateToTutorials,
+        onViewInvoice = onViewInvoice,
         initialEditBookingId = initialEditBookingId,
         initialRepeatBookingId = initialRepeatBookingId,
         initialIsReturnFlow = initialIsReturnFlow,
@@ -1222,12 +1430,14 @@ private fun TestDashboardWrapper(
     activity: MainActivity,
     onNavigateToLiveRide: (bookingId: String?) -> Unit,
     onNavigateToNotifications: () -> Unit,
+    onNavigateToFaq: () -> Unit = {},
+    onNavigateToTutorials: () -> Unit = {},
+    onViewInvoice: (Int) -> Unit = {},
     initialEditBookingId: Int? = null,
     initialRepeatBookingId: Int? = null,
     initialIsReturnFlow: Boolean = false,
     shouldOpenDrawer: Boolean = false
 ) {
-    // For now, just pass null - test button won't show
     DashboardScreen(
         onNavigateToProfile = onNavigateToProfile,
         onNavigateToBookings = onNavigateToBookings,
@@ -1242,18 +1452,13 @@ private fun TestDashboardWrapper(
         onRequestLocationPermission = { activity.requestLocationPermissions() },
         onNavigateToLiveRide = onNavigateToLiveRide,
         onNavigateToNotifications = onNavigateToNotifications,
+        onNavigateToFaq = onNavigateToFaq,
+        onNavigateToTutorials = onNavigateToTutorials,
+        onViewInvoice = onViewInvoice,
         initialEditBookingId = initialEditBookingId,
         initialRepeatBookingId = initialRepeatBookingId,
         initialIsReturnFlow = initialIsReturnFlow,
         shouldOpenDrawer = shouldOpenDrawer,
         navController = navController
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-fun OnboardingScreenPreview() {
-    LimouserappTheme {
-        OnboardingScreen(onGetStarted = {})
-    }
 }

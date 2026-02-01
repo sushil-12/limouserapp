@@ -53,15 +53,19 @@ class LoadingInterceptor @Inject constructor(
         )
         
         // Skip loading for airport API calls (they use shimmer instead)
-        // Check for the endpoint and the only_airports parameter
         if (url.contains("/api/mobile-data", ignoreCase = true)) {
-            // Check for only_airports parameter in various formats
-            if (url.contains("only_airports", ignoreCase = true) || 
+            if (url.contains("only_airports", ignoreCase = true) ||
                 url.contains("onlyAirports", ignoreCase = true)) {
                 return true
             }
         }
-        
+
+        // Skip global overlay for FAQ and Tutorials – screens use in-place shimmers
+        if (url.contains("api/user-faq", ignoreCase = true) ||
+            url.contains("api/tutorials", ignoreCase = true)) {
+            return true
+        }
+
         return skipPatterns.any { url.contains(it, ignoreCase = true) }
     }
 }

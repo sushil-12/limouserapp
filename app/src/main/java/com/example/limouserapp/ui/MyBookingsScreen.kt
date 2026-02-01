@@ -54,6 +54,7 @@ fun MyBookingsScreen(
     onEditBooking: (Int) -> Unit = {},
     onRepeatBooking: (Int) -> Unit = {},
     onReturnBooking: (Int) -> Unit = {},
+    onViewInvoice: (Int) -> Unit = {},
     viewModel: MyBookingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -186,7 +187,8 @@ fun MyBookingsScreen(
                                         contactPhoneNumber = phoneNumber
                                         contactDriverName = booking.fullDriverName
                                         showContactSheet = true
-                                    }
+                                    },
+                                    onViewInvoice = onViewInvoice
                                 )
                             }
                         }

@@ -1,15 +1,12 @@
 package com.example.limouserapp.ui.theme
 
-import android.app.Activity
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.CompositionLocalProvider
 
 private val DarkColorScheme = darkColorScheme(
     primary = LimoOrange
@@ -29,6 +26,11 @@ private val LightColorScheme = lightColorScheme(
     */
 )
 
+/**
+ * App theme with ripple effect disabled app-wide (matches limodriverapp behavior).
+ * LocalRippleConfiguration = null removes Material ripple from buttons, list items, etc.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LimouserappTheme(
     darkTheme: Boolean = false, // Force light mode - dark mode disabled
@@ -41,9 +43,11 @@ fun LimouserappTheme(
         else -> LightColorScheme
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = AppTypography,
-        content = content
-    )
+    CompositionLocalProvider(LocalRippleConfiguration provides null) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = AppTypography,
+            content = content
+        )
+    }
 }

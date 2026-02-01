@@ -1,42 +1,37 @@
 package com.example.limouserapp.ui.components
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Error
-import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.example.limouserapp.ui.theme.LimoGreen
-import com.example.limouserapp.ui.theme.LimoOrange
-import com.example.limouserapp.ui.theme.LimoRed
 
-// Ensure standard colors are available if not in your theme
-val LimoBlue = Color(0xFF2196F3)
-
-enum class AlertType { SUCCESS, ERROR, WARNING, INFO }
+// --- iOS Constants ---
+private val IosBlue = Color(0xFF007AFF)
+private val IosRed = Color(0xFFFF3B30)
+private val IosSeparator = Color(0xFF3F3F3F).copy(alpha = 0.2f)
+private val IosDialogBackground = Color(0xFFF2F2F2) // Slightly off-white
+private val IosDialogDarkBackground = Color(0xFF1E1E1E) // Dark mode equivalent
 
 @Composable
 fun CommonErrorAlertDialog(
     isVisible: Boolean,
     onDismiss: () -> Unit,
-    type: AlertType,
+    type: AlertType, // Kept for logic, but styling is now cleaner
     title: String,
     message: String,
     confirmText: String = "OK",
@@ -46,11 +41,15 @@ fun CommonErrorAlertDialog(
 ) {
     if (!isVisible) return
 
-    val mainColor = when (type) {
-        AlertType.SUCCESS -> LimoGreen
-        AlertType.ERROR -> LimoRed
-        AlertType.WARNING -> LimoOrange
-        AlertType.INFO -> LimoBlue
+    val isDarkMode = androidx.compose.foundation.isSystemInDarkTheme()
+    val backgroundColor = if (isDarkMode) IosDialogDarkBackground else IosDialogBackground
+    val contentColor = if (isDarkMode) Color.White else Color.Black
+
+    // Logic: If it's an error/warning, maybe make the confirm button Red?
+    // Otherwise default to iOS Blue.
+    val confirmColor = when (type) {
+        AlertType.ERROR -> IosRed
+        else -> IosBlue
     }
 
     Dialog(
@@ -58,114 +57,79 @@ fun CommonErrorAlertDialog(
         properties = DialogProperties(
             dismissOnBackPress = true,
             dismissOnClickOutside = true,
-            usePlatformDefaultWidth = false
+            usePlatformDefaultWidth = false // Crucial for custom sizing
         )
     ) {
-        Surface(
+        Box(
             modifier = Modifier
-                .widthIn(max = 300.dp) // <--- KEY FIX: Stops it from getting too wide
-                .fillMaxWidth(0.85f)   // Will only fill up to 300dp or 85%, whichever is smaller
-                .wrapContentHeight(),
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-            tonalElevation = 6.dp
+                .width(270.dp) // Standard iOS Alert width
+                .clip(RoundedCornerShape(14.dp)) // Standard iOS Corner Radius
+                .background(backgroundColor),
+            contentAlignment = Alignment.Center
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp), // Much tighter padding
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // 1. Small Icon
-                Box(
-                    modifier = Modifier
-                        .size(40.dp) // Reduced from 56dp
-                        .background(
-                            color = mainColor.copy(alpha = 0.12f),
-                            shape = CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
+                // --- Top Content Section ---
+                Column(
+                    modifier = Modifier.padding(top = 20.dp, start = 16.dp, end = 16.dp, bottom = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(
-                        imageVector = getIconForType(type),
-                        contentDescription = null,
-                        tint = mainColor,
-                        modifier = Modifier.size(20.dp)
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        ),
+                        color = contentColor,
+                        textAlign = TextAlign.Center
                     )
-                }
 
-                Spacer(modifier = Modifier.height(12.dp)) // Reduced spacing
-
-                // 2. Compact Text
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium.copy( // Smaller title style
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(20.dp)) // Reduced spacing before button
-
-                // 3. Compact Buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (dismissText != null) {
-                        OutlinedButton(
-                            onClick = { onDismissClick?.invoke() ?: onDismiss() },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp), // Compact height
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            ),
-                            contentPadding = PaddingValues(0.dp) // Reduces internal button bloat
-                        ) {
-                            Text(
-                                text = dismissText,
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                        }
-                    }
-
-                    Button(
-                        onClick = onConfirm,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp), // Compact height
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = mainColor,
-                            contentColor = Color.White
-                        ),
-                        elevation = ButtonDefaults.buttonElevation(0.dp),
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
+                    if (message.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = confirmText,
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = FontWeight.Bold
-                            )
+                            text = message,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 13.sp,
+                                lineHeight = 16.sp
+                            ),
+                            color = contentColor.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center
                         )
                     }
+                }
+
+                // --- Button Grid Area ---
+                // Horizontal Divider separating content from buttons
+                HorizontalDivider(color = IosSeparator, thickness = 0.5.dp)
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp) // Standard iOS Button Height
+                ) {
+                    // 1. Dismiss Button (Optional)
+                    if (dismissText != null) {
+                        IosDialogButton(
+                            text = dismissText,
+                            color = IosBlue, // Dismiss is usually Blue (or standard text)
+                            fontWeight = FontWeight.Normal, // Dismiss is usually normal weight
+                            onClick = { onDismissClick?.invoke() ?: onDismiss() },
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // Vertical Divider between buttons
+                        VerticalDivider(color = IosSeparator, thickness = 0.5.dp)
+                    }
+
+                    // 2. Confirm Button
+                    IosDialogButton(
+                        text = confirmText,
+                        color = confirmColor,
+                        fontWeight = FontWeight.SemiBold, // Primary action is usually bolder
+                        onClick = onConfirm,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
         }
@@ -173,16 +137,37 @@ fun CommonErrorAlertDialog(
 }
 
 @Composable
-private fun getIconForType(type: AlertType): ImageVector {
-    return when (type) {
-        AlertType.SUCCESS -> Icons.Rounded.CheckCircle
-        AlertType.ERROR -> Icons.Rounded.Error
-        AlertType.WARNING -> Icons.Rounded.Warning
-        AlertType.INFO -> Icons.Rounded.Info
+private fun IosDialogButton(
+    text: String,
+    color: Color,
+    fontWeight: FontWeight,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .clickable(
+                onClick = onClick,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = ripple(color = Color.Gray)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge.copy(
+                fontSize = 17.sp,
+                fontWeight = fontWeight
+            ),
+            color = color
+        )
     }
 }
 
-// --- Convenience Wrappers (Unchanged) ---
+// --- Enum & Convenience Wrappers (Kept identical for compatibility) ---
+
+enum class AlertType { SUCCESS, ERROR, WARNING, INFO }
 
 @Composable
 fun SuccessAlertDialog(

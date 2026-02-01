@@ -82,8 +82,8 @@ fun AccountSettingsScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 16.dp)
-                        .padding(bottom = 16.dp) // Extra bottom padding for safety
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 4.dp, top = 16.dp) // Extra bottom padding for safety
                 ) {
                     // Error message above button if needed
                     if (uiState.error != null) {
